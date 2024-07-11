@@ -1,0 +1,12 @@
+.vscode
+vcpkg
+
+*.exe
+*.o
+*.d
+
+bin
+obj
+
+args
+*.txt
