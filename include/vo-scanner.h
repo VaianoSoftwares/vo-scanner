@@ -17,26 +17,22 @@
                       "%s"
 #define LOGIN_BODY_FMT "{\"username\":\"%s\",\"password\":\"%s\"}"
 
-#define TIMBRA_MSG_FMT "POST /api/v1/badges/archivio HTTP/1.1\r\n"                                          \
-                       "Host: %s\r\n"                                                                       \
-                       "Cookie: %s\r\n"                                                                     \
-                       "Content-Type: multipart/form-data; boundary=--------------------01234567890123\r\n" \
-                       "Content-Length: %zd\r\n\r\n"                                                        \
-                       "------------------------------01234567890123\r\n"                                   \
-                       "Content-Disposition: form-data; name=\"file\"; filename=\"tmp.txt\"\r\n"            \
-                       "Content-Type: text/plain\r\n\r\n"                                                   \
-                       "%s"                                                                                 \
-                       "-----------------------------01234567890123\r\n"
-#define TIMBRA_EMPTY_BODY_LEN 184
+#define TIMBRA_MSG_FMT "POST /api/v1/badges/archivio HTTP/1.1\r\n"         \
+                       "Host: %s\r\n"                                      \
+                       "Cookie: %s\r\n"                                    \
+                       "Content-Type: application/json; charset=utf-8\r\n" \
+                       "Content-Length: %zd\r\n\r\n"                       \
+                       "%s"
 
 #define NMAX_CONN_TRIES 10
 #define UNAUTHORIZED_STATUS_CODE 401
 #define FORBIDDEN_STATUS_CODE 403
 #define SUCCESS_STATUS_CODE 200
 
-#define TIMBRA_LOG_FILENAME "data\\timbrature.txt"
+#define TIMBRA_LOG_FILENAME "data\\timbrature.json"
 #define COOKIES_FILENAME "data\\cookies.txt"
 #define SCAN_BUF_SIZE 15
+#define TIMBRA_LOG_ROW_FMT ",{\"badge_cod\":\"%s\",\"post_id\":%u,\"created_at\":\"%s\"},"
 
 typedef struct ThreadParams
 {

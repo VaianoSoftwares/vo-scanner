@@ -76,7 +76,7 @@ void timbra_logger(const uint32_t postazione_id)
         if (fopen_s(&timbra_log, TIMBRA_LOG_FILENAME, "a+"))
             throw_err("fopen_s");
 
-        fprintf_s(timbra_log, "%s~%u~%s\n", scan_buf, postazione_id, timestamp());
+        fprintf_s(timbra_log, TIMBRA_LOG_ROW_FMT, scan_buf, postazione_id, timestamp());
         fclose(timbra_log);
 
         ReleaseMutex(log_mutex);
@@ -179,12 +179,18 @@ void send_timbra_reqs(void *tparams)
         // send timbra request with 1 minute delay
         Sleep(1000 * 60 * 60);
 
+        WaitForSingleObject(log_mutex, INFINITE);
+
         if (!read_timbra_log(msg_body, sizeof(msg_body)))
         {
             print_err("read_timbra_log");
+            ReleaseMutex(log_mutex);
             continue;
         }
-        size_t body_len = TIMBRA_EMPTY_BODY_LEN + strlen(msg_body);
+        size_t body_len = strlen(msg_body);
+        msg_body[0] = '[';
+        msg_body[body_len - 1] = ']';
+
         _snprintf_s(req_buf, sizeof(req_buf), sizeof(req_buf) - 1, TIMBRA_MSG_FMT, hostname, cookies, body_len, msg_body);
 
         puts("Timbra Request");
@@ -197,6 +203,7 @@ void send_timbra_reqs(void *tparams)
         {
             ERR_print_errors_fp(stderr);
             print_err("Unable to send request.");
+            ReleaseMutex(log_mutex);
             connected = FALSE;
             continue;
         }
@@ -206,6 +213,7 @@ void send_timbra_reqs(void *tparams)
         {
             ERR_print_errors_fp(stderr);
             print_err("No response. (nbytes=%d)", nbytes);
+            ReleaseMutex(log_mutex);
             connected = FALSE;
             continue;
         }
@@ -224,7 +232,12 @@ void send_timbra_reqs(void *tparams)
             has_cookies = FALSE;
             print_err("timbra request has been rejected");
             break;
+        default:
+            empty_timbra_log();
+            break;
         }
+
+        ReleaseMutex(log_mutex);
     }
 }
 
@@ -514,18 +527,30 @@ BOOL read_timbra_log(char *buf, size_t size)
 {
     FILE *timbra_log;
 
-    WaitForSingleObject(log_mutex, INFINITE);
-
     if (fopen_s(&timbra_log, TIMBRA_LOG_FILENAME, "r"))
     {
         print_err("fopen_s");
-        ReleaseMutex(log_mutex);
         return FALSE;
     }
 
     size_t i = 0;
     while (i < size && !feof(timbra_log))
         buf[i++] = fgetc(timbra_log);
+
+    fclose(timbra_log);
+
+    return TRUE;
+}
+
+BOOL empty_timbra_log(void)
+{
+    FILE *timbra_log;
+
+    if (fopen_s(&timbra_log, TIMBRA_LOG_FILENAME, "w"))
+    {
+        print_err("fopen_s");
+        return FALSE;
+    }
 
     ReleaseMutex(log_mutex);
 
