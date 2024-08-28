@@ -26,19 +26,19 @@
     } while (0)
 
 #define DEFAULT_HOSTNAME "127.0.0.1"
-#define DEFAULT_SERVER_PORT 4316
+#define DEFAULT_SERVER_PORT 4317
 
 #define NMIN_COM 1
 #define NMAX_COM 255
 #define INVALID_COM_NUM 0
 #define COM_PORT_FORMAT "\\\\.\\COM%hhu"
 
-#define LOGIN_MSG_FMT "POST /api/v1/users/user/login HTTP/1.1\r\n"        \
+#define LOGIN_MSG_FMT "POST /api/v1/users/login HTTP/1.1\r\n"             \
                       "Host: %s\r\n"                                      \
                       "Content-Type: application/json; charset=utf-8\r\n" \
                       "Content-Length: %zd\r\n\r\n"                       \
                       "%s"
-#define LOGIN_BODY_FMT "{\"username\":\"%s\",\"password\":\"%s\"}"
+#define LOGIN_BODY_FMT "{\"name\":\"%s\",\"password\":\"%s\"}"
 
 #define TIMBRA_MSG_FMT "POST /api/v1/badges/archivio HTTP/1.1\r\n"         \
                        "Host: %s\r\n"                                      \

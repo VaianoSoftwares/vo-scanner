@@ -4,7 +4,7 @@
 
 HANDLE log_mutex;
 
-int main(int argc, char **argv)
+int main(int argc, char *argv[])
 {
     if (argc < 3)
         throw_err("usage: %s <password> <postazioneId> <hostname> <port>", argv[0]);
@@ -26,6 +26,8 @@ int main(int argc, char **argv)
 
     puts("Waiting for children.");
     WaitForSingleObject(hthread, INFINITE);
+
+    CloseHandle(hthread);
 
     puts("Execution terminated.");
 
@@ -162,6 +164,7 @@ void send_timbra_reqs(void *tparams)
             if (!has_cookies)
             {
                 print_err("save_cookies");
+                Sleep(4 * 1000);
                 continue;
             }
 
@@ -231,6 +234,8 @@ void send_timbra_reqs(void *tparams)
 
         ReleaseMutex(log_mutex);
     }
+
+    _endthread();
 }
 
 uint8_t find_serial_port(HANDLE *hcomm)
@@ -343,7 +348,6 @@ BOOL read_scanner(HANDLE hcomm, DWORD event_mask, char *buf, size_t size)
     char tmp_ch;
     DWORD bytes_read;
     size_t i = 0;
-
     do
     {
         tmp_ch = '\0';
