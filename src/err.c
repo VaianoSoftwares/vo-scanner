@@ -1,5 +1,6 @@
-#include <windows.h>
-#include <stdio.h>
+/* err.c */
+
+#include "err.h"
 
 DWORD __print_err(const char *msg, va_list argptr)
 {

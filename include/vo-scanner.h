@@ -1,6 +1,29 @@
-#pragma once
+/* vo-scanner.h */
 
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <openssl/err.h>
+#include <openssl/ssl.h>
+#include <process.h>
+#include <windows.h>
+#include <winsock2.h>
+#include <ws2tcpip.h>
+
+#define print_err(fmt, ...)                                   \
+    do                                                        \
+    {                                                         \
+        fprintf(stderr, "%s:%d:%s(): " fmt "\n",              \
+                __FILE__, __LINE__, __func__, ##__VA_ARGS__); \
+    } while (0)
+
+#define throw_err(fmt, ...)                                   \
+    do                                                        \
+    {                                                         \
+        fprintf(stderr, "%s:%d:%s(): " fmt "\n",              \
+                __FILE__, __LINE__, __func__, ##__VA_ARGS__); \
+        exit(GetLastError());                                 \
+    } while (0)
 
 #define DEFAULT_HOSTNAME "127.0.0.1"
 #define DEFAULT_SERVER_PORT 4316
@@ -55,3 +78,5 @@ BOOL get_cookies(char *buf, size_t size);
 BOOL save_cookies(char *src, size_t src_size, char *dest, size_t dest_size);
 BOOL read_timbra_log(char *buf, size_t size);
 uint16_t get_response_status(char *res);
+BOOL empty_timbra_log(void);
+int main(int argc, char **argv);

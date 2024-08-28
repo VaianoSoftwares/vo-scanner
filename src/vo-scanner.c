@@ -1,13 +1,5 @@
-#include <openssl/err.h>
-#include <openssl/ssl.h>
-#include <process.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <windows.h>
-#include <winsock2.h>
-#include <ws2tcpip.h>
-#include "err.h"
+/* vo-scanner.c */
+
 #include "vo-scanner.h"
 
 HANDLE log_mutex;
@@ -28,14 +20,14 @@ int main(int argc, char **argv)
 
     HANDLE hthread = (HANDLE)_beginthread(send_timbra_reqs, 0, (void *)&tparams);
     if (!hthread || hthread == INVALID_HANDLE_VALUE)
-        throw_err("MAIN | _beginthread");
+        throw_err("_beginthread");
 
     timbra_logger((uint32_t)atoi(argv[2]));
 
-    puts("MAIN | Waiting for children.");
+    puts("Waiting for children.");
     WaitForSingleObject(hthread, INFINITE);
 
-    puts("MAIN | Execution terminated.");
+    puts("Execution terminated.");
 
     return EXIT_SUCCESS;
 }
@@ -119,10 +111,10 @@ void send_timbra_reqs(void *tparams)
             // make ssl connection
             ssl = SSL_new(ctx);
             SSL_set_fd(ssl, sock);
-            if (SSL_connect(ssl) == -1)
+            if (SSL_connect(ssl) < 0)
             {
                 ERR_print_errors_fp(stderr);
-                print_err("main | SSL_connect");
+                print_err("SSL_connect");
                 continue;
             }
 
@@ -232,7 +224,7 @@ void send_timbra_reqs(void *tparams)
             has_cookies = FALSE;
             print_err("timbra request has been rejected");
             break;
-        default:
+        case SUCCESS_STATUS_CODE:
             empty_timbra_log();
             break;
         }
@@ -343,7 +335,7 @@ BOOL read_scanner(HANDLE hcomm, DWORD event_mask, char *buf, size_t size)
 
     if (!WaitCommEvent(hcomm, &event_mask, NULL))
     {
-        print_err("read_scanner | WaitCommEvent");
+        print_err("WaitCommEvent");
         CloseHandle(hcomm);
         return FALSE;
     }
@@ -358,7 +350,7 @@ BOOL read_scanner(HANDLE hcomm, DWORD event_mask, char *buf, size_t size)
 
         if (!ReadFile(hcomm, &tmp_ch, sizeof(tmp_ch), &bytes_read, NULL))
         {
-            print_err("read_scanner | ReadFile");
+            print_err("ReadFile");
             CloseHandle(hcomm);
             return FALSE;
         }
@@ -371,14 +363,14 @@ BOOL read_scanner(HANDLE hcomm, DWORD event_mask, char *buf, size_t size)
     return TRUE;
 }
 
-char *timestamp(void)
+char *timestamp()
 {
     const time_t now = time(NULL);
     const struct tm *time_ptr = localtime(&now);
     return asctime(time_ptr);
 }
 
-SSL_CTX *init_CTX(void)
+SSL_CTX *init_CTX()
 {
     OpenSSL_add_all_algorithms(); /* Load cryptos, et.al. */
     SSL_load_error_strings();     /* Bring in and register error messages */
@@ -388,7 +380,7 @@ SSL_CTX *init_CTX(void)
     if (ctx == NULL)
     {
         ERR_print_errors_fp(stderr);
-        print_err("init_CTX | SSL_CTX_new");
+        print_err("SSL_CTX_new");
         return NULL;
     }
 
@@ -423,7 +415,7 @@ SOCKET conn_to_server(const char *hostname, uint16_t port)
 
     if (WSAStartup(MAKEWORD(2, 2), &wsa) != NO_ERROR)
     {
-        print_err("conn_to_server | WSAStartup. Failed. Error Code : %d.", WSAGetLastError());
+        print_err("WSAStartup. Failed. Error Code : %d.", WSAGetLastError());
         return INVALID_SOCKET;
     }
 
@@ -542,7 +534,7 @@ BOOL read_timbra_log(char *buf, size_t size)
     return TRUE;
 }
 
-BOOL empty_timbra_log(void)
+BOOL empty_timbra_log()
 {
     FILE *timbra_log;
 
