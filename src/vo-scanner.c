@@ -2,9 +2,11 @@
 
 #include "vo-scanner.h"
 
-HANDLE log_mutex;
+static pthread_mutex_t log_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t send_req_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t send_req_cond = PTHREAD_COND_INITIALIZER;
 
-int main(int argc, char *argv[])
+int main(int argc, char **argv)
 {
     if (argc < 3)
         throw_err("usage: %s <password> <postazioneId> <hostname> <port>", argv[0]);
@@ -12,22 +14,19 @@ int main(int argc, char *argv[])
     ThreadParams tparams = {
         .hostname = argc > 3 ? argv[3] : DEFAULT_HOSTNAME,
         .port = argc > 4 ? (uint16_t)atoi(argv[4]) : DEFAULT_SERVER_PORT,
-        .password = argv[1]};
+        .password = argv[1],
+        .user_agent = argv[0]};
 
     CreateDirectory("data", NULL);
 
-    log_mutex = CreateMutex(NULL, FALSE, NULL);
-
-    HANDLE hthread = (HANDLE)_beginthread(send_timbra_reqs, 0, (void *)&tparams);
-    if (!hthread || hthread == INVALID_HANDLE_VALUE)
-        throw_err("_beginthread");
+    pthread_t pid;
+    if (pthread_create(&pid, NULL, send_timbra_reqs, (void *)&tparams))
+        throw_err("pthread_create");
 
     timbra_logger((uint32_t)atoi(argv[2]));
 
     puts("Waiting for children.");
-    WaitForSingleObject(hthread, INFINITE);
-
-    CloseHandle(hthread);
+    pthread_join(pid, NULL);
 
     puts("Execution terminated.");
 
@@ -38,52 +37,59 @@ void timbra_logger(const uint32_t postazione_id)
 {
     HANDLE hcomm = INVALID_HANDLE_VALUE;
     DWORD event_mask;
+    uint8_t ncomm = INVALID_COM_NUM;
 
     while (TRUE)
     {
         if (hcomm == INVALID_HANDLE_VALUE)
         {
-            uint8_t comm_num = open_serial_port(&hcomm, &event_mask);
-            if (!comm_num)
+            if (!(ncomm = open_serial_port(&hcomm, &event_mask)))
             {
-                print_err("find_serial_port");
+                print_err("open_serial_port");
                 Sleep(1000);
                 continue;
             }
 
-            printf("Device connected to COM%hhu\n", comm_num);
+            printf("Device connected to COM%hhu\n", ncomm);
         }
 
         char scan_buf[SCAN_BUF_SIZE];
         if (!read_scanner(hcomm, event_mask, scan_buf, sizeof(scan_buf)))
         {
-            print_err("read_scanner");
+            print_err("read_scanner (COM%hhu)", ncomm);
             close_com(hcomm);
             continue;
         }
 
-        printf("Code has been read from device: %s\n", scan_buf);
+        printf("Code has been read from device (COM%hhu): %s\n", ncomm, scan_buf);
 
-        WaitForSingleObject(log_mutex, INFINITE);
+        pthread_mutex_lock(&log_mutex);
 
         FILE *timbra_log;
         if (fopen_s(&timbra_log, TIMBRA_LOG_FILENAME, "a+"))
             throw_err("fopen_s");
 
-        fprintf_s(timbra_log, TIMBRA_LOG_ROW_FMT, scan_buf, postazione_id, timestamp());
+        char date_str[26];
+        timestamp(date_str);
+        fprintf_s(timbra_log, TIMBRA_LOG_ROW_FMT, scan_buf, postazione_id, date_str);
         fclose(timbra_log);
 
-        ReleaseMutex(log_mutex);
+        pthread_mutex_unlock(&log_mutex);
+
+        pthread_mutex_lock(&send_req_mutex);
+        pthread_cond_signal(&send_req_cond);
+        pthread_mutex_unlock(&send_req_mutex);
     }
 
     close_com(hcomm);
 }
 
-void send_timbra_reqs(void *tparams)
+void *send_timbra_reqs(void *vargp)
 {
-    const char *hostname = ((ThreadParams *)tparams)->hostname;
-    const uint16_t port = ((ThreadParams *)tparams)->port;
-    const char *password = ((ThreadParams *)tparams)->password;
+    const char *hostname = ((ThreadParams *)vargp)->hostname;
+    const uint16_t port = ((ThreadParams *)vargp)->port;
+    const char *password = ((ThreadParams *)vargp)->password;
+    const char *user_agent = ((ThreadParams *)vargp)->user_agent;
 
     DWORD uname_size = MAX_COMPUTERNAME_LENGTH + 1;
     char username[uname_size];
@@ -92,13 +98,17 @@ void send_timbra_reqs(void *tparams)
 
     char cookies[1024];
     BOOL has_cookies = get_cookies(cookies, sizeof(cookies));
-    if (!has_cookies)
+    if (has_cookies)
+        puts("Cookies acquired");
+    else
         puts("No cookies available");
 
-    // init ssl lib
     SSL_library_init();
 
-    SSL_CTX *ctx = NULL;
+    SSL_CTX *ctx = init_CTX();
+    if (ctx == NULL)
+        throw_err("init_CTX");
+
     SOCKET sock = INVALID_SOCKET;
     SSL *ssl = NULL;
     BOOL connected = FALSE;
@@ -107,20 +117,21 @@ void send_timbra_reqs(void *tparams)
     {
         if (!connected)
         {
-            ctx = init_CTX();
-            // connect to server
             sock = conn_to_server(hostname, port);
-            // make ssl connection
+
             ssl = SSL_new(ctx);
             SSL_set_fd(ssl, sock);
             if (SSL_connect(ssl) < 0)
             {
                 ERR_print_errors_fp(stderr);
                 print_err("SSL_connect");
+                Sleep(1000);
                 continue;
             }
 
+            puts("----------------------------------------------------------------------------------------------------------");
             show_certs(ssl);
+            puts("----------------------------------------------------------------------------------------------------------");
 
             connected = TRUE;
         }
@@ -131,10 +142,10 @@ void send_timbra_reqs(void *tparams)
         if (!has_cookies)
         {
             _snprintf_s(msg_body, sizeof(msg_body), sizeof(msg_body) - 1, LOGIN_BODY_FMT, username, password);
-            _snprintf_s(req_buf, sizeof(req_buf), sizeof(req_buf) - 1, LOGIN_MSG_FMT, hostname, strlen(msg_body), msg_body);
+            _snprintf_s(req_buf, sizeof(req_buf), sizeof(req_buf) - 1, LOGIN_MSG_FMT, hostname, user_agent, strlen(msg_body), msg_body);
 
-            puts("Login Request");
             puts("----------------------------------------------------------------------------------------------------------");
+            puts("Login Request");
             puts(req_buf);
             puts("----------------------------------------------------------------------------------------------------------");
 
@@ -155,8 +166,8 @@ void send_timbra_reqs(void *tparams)
             }
             res_buf[nbytes] = '\0';
 
-            puts("Login Response");
             puts("----------------------------------------------------------------------------------------------------------");
+            puts("Login Response");
             puts(res_buf);
             puts("----------------------------------------------------------------------------------------------------------");
 
@@ -171,25 +182,24 @@ void send_timbra_reqs(void *tparams)
             puts("Cookies acquired");
         }
 
-        // send timbra request with 1 minute delay
-        Sleep(1000 * 60 * 60);
+        pthread_mutex_lock(&send_req_mutex);
+        pthread_cond_wait(&send_req_cond, &send_req_mutex);
 
-        WaitForSingleObject(log_mutex, INFINITE);
+        pthread_mutex_lock(&log_mutex);
 
         if (!read_timbra_log(msg_body, sizeof(msg_body)))
         {
             print_err("read_timbra_log");
-            ReleaseMutex(log_mutex);
+            pthread_mutex_unlock(&log_mutex);
+            pthread_mutex_unlock(&send_req_mutex);
             continue;
         }
         size_t body_len = strlen(msg_body);
-        msg_body[0] = '[';
-        msg_body[body_len - 1] = ']';
 
-        _snprintf_s(req_buf, sizeof(req_buf), sizeof(req_buf) - 1, TIMBRA_MSG_FMT, hostname, cookies, body_len, msg_body);
+        _snprintf_s(req_buf, sizeof(req_buf), sizeof(req_buf) - 1, TIMBRA_MSG_FMT, hostname, user_agent, cookies, body_len, msg_body);
 
-        puts("Timbra Request");
         puts("----------------------------------------------------------------------------------------------------------");
+        puts("Timbra Request");
         puts(req_buf);
         puts("----------------------------------------------------------------------------------------------------------");
 
@@ -198,7 +208,8 @@ void send_timbra_reqs(void *tparams)
         {
             ERR_print_errors_fp(stderr);
             print_err("Unable to send request.");
-            ReleaseMutex(log_mutex);
+            pthread_mutex_unlock(&log_mutex);
+            pthread_mutex_unlock(&send_req_mutex);
             connected = FALSE;
             continue;
         }
@@ -208,14 +219,15 @@ void send_timbra_reqs(void *tparams)
         {
             ERR_print_errors_fp(stderr);
             print_err("No response. (nbytes=%d)", nbytes);
-            ReleaseMutex(log_mutex);
+            pthread_mutex_unlock(&log_mutex);
+            pthread_mutex_unlock(&send_req_mutex);
             connected = FALSE;
             continue;
         }
         res_buf[nbytes] = '\0';
 
-        puts("Timbra Response");
         puts("----------------------------------------------------------------------------------------------------------");
+        puts("Timbra Response");
         puts(req_buf);
         puts("----------------------------------------------------------------------------------------------------------");
 
@@ -225,26 +237,34 @@ void send_timbra_reqs(void *tparams)
         case UNAUTHORIZED_STATUS_CODE:
         case FORBIDDEN_STATUS_CODE:
             has_cookies = FALSE;
-            print_err("timbra request has been rejected");
+            print_err("Timbra requests have been rejected. Status code: %hu", status_code);
             break;
         case SUCCESS_STATUS_CODE:
+            printf("Timbra requests have been (fully/partialy) accepted.\n");
             empty_timbra_log();
             break;
+        case CLIENT_ERROR_STATUS_CODE:
+            printf("Timbra requests have been rejected (deleting log file). Status code: %hu\n", status_code);
+            empty_timbra_log();
+            break;
+        default:
+            print_err("Timbra requests have been rejected. Status code: %hu", status_code);
         }
 
-        ReleaseMutex(log_mutex);
+        pthread_mutex_unlock(&log_mutex);
+        pthread_mutex_unlock(&send_req_mutex);
     }
 
-    _endthread();
+    return NULL;
 }
 
 uint8_t find_serial_port(HANDLE *hcomm)
 {
     char comm_name[16];
 
-    for (uint8_t i = NMIN_COM; i <= NMAX_COM; ++i)
+    for (uint8_t i = NMIN_COM; i && i <= NMAX_COM; ++i)
     {
-        _snprintf_s(comm_name, sizeof(comm_name), sizeof(comm_name), COM_PORT_FORMAT, i);
+        _snprintf_s(comm_name, sizeof(comm_name), sizeof(comm_name) - 1, COM_PORT_FORMAT, i);
 
         *hcomm = CreateFile(
             comm_name,
@@ -332,7 +352,7 @@ void close_com(HANDLE *hcomm)
 {
     if (*hcomm)
         CloseHandle(*hcomm);
-    *hcomm = NULL;
+    *hcomm = INVALID_HANDLE_VALUE;
 }
 
 BOOL read_scanner(HANDLE hcomm, DWORD event_mask, char *buf, size_t size)
@@ -341,7 +361,7 @@ BOOL read_scanner(HANDLE hcomm, DWORD event_mask, char *buf, size_t size)
     if (!WaitCommEvent(hcomm, &event_mask, NULL))
     {
         print_err("WaitCommEvent");
-        CloseHandle(hcomm);
+        close_com(&hcomm);
         return FALSE;
     }
 
@@ -350,31 +370,32 @@ BOOL read_scanner(HANDLE hcomm, DWORD event_mask, char *buf, size_t size)
     size_t i = 0;
     do
     {
-        tmp_ch = '\0';
+        tmp_ch = 0;
 
         if (!ReadFile(hcomm, &tmp_ch, sizeof(tmp_ch), &bytes_read, NULL))
         {
             print_err("ReadFile");
-            CloseHandle(hcomm);
+            close_com(&hcomm);
             return FALSE;
         }
 
         buf[i++] = tmp_ch;
     } while (bytes_read && i < size);
 
-    buf[size - 1] = '\0';
+    buf[i - 1] = 0;
 
     return TRUE;
 }
 
-char *timestamp()
+void timestamp(char *buf)
 {
-    const time_t now = time(NULL);
-    const struct tm *time_ptr = localtime(&now);
-    return asctime(time_ptr);
+    const struct tm tm = *localtime(&(time_t){time(NULL)});
+    if (asctime_s(buf, 26, &tm))
+        throw_err("asctime_s");
+    buf[24] = 0;
 }
 
-SSL_CTX *init_CTX()
+SSL_CTX *init_CTX(void)
 {
     OpenSSL_add_all_algorithms(); /* Load cryptos, et.al. */
     SSL_load_error_strings();     /* Bring in and register error messages */
@@ -412,10 +433,10 @@ void show_certs(SSL *ssl)
     X509_free(cert);
 }
 
-SOCKET conn_to_server(const char *hostname, uint16_t port)
+SOCKET conn_to_server(const char *hostname, const uint16_t port)
 {
-    WSADATA wsa;
     SOCKET sock;
+    WSADATA wsa;
 
     if (WSAStartup(MAKEWORD(2, 2), &wsa) != NO_ERROR)
     {
@@ -442,7 +463,7 @@ SOCKET conn_to_server(const char *hostname, uint16_t port)
 
     // loop while connection is not enstablished
     BOOL connected = FALSE;
-    uint8_t ntries = 0;
+    uint8_t ntries = 1;
     while (!connected && ntries < NMAX_CONN_TRIES)
     {
         // connect to server
@@ -529,30 +550,35 @@ BOOL read_timbra_log(char *buf, size_t size)
         return FALSE;
     }
 
-    size_t i = 0;
+    size_t i = 1;
+
     while (i < size && !feof(timbra_log))
         buf[i++] = fgetc(timbra_log);
+
+    buf[0] = '[';
+    buf[i - 2] = ']';
+    buf[i - 1] = '\0';
 
     fclose(timbra_log);
 
     return TRUE;
 }
 
-BOOL empty_timbra_log()
+BOOL empty_timbra_log(void)
 {
     FILE *timbra_log;
+    errno_t ret = fopen_s(&timbra_log, TIMBRA_LOG_FILENAME, "w");
 
-    if (fopen_s(&timbra_log, TIMBRA_LOG_FILENAME, "w"))
+    if (ret)
     {
         print_err("fopen_s");
-        return FALSE;
+    }
+    else
+    {
+        fclose(timbra_log);
     }
 
-    ReleaseMutex(log_mutex);
-
-    fclose(timbra_log);
-
-    return TRUE;
+    return !ret;
 }
 
 uint16_t get_response_status(char *res)

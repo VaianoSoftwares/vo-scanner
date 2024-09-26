@@ -17,7 +17,7 @@ CFLAG = $(INC_FLAG) -MMD -MP -g
 
 # linker flags
 LIB_FLAG = $(addprefix -L,$(LIB_DIR))
-LINK_FLAG_BACK = $(LIB_FLAG) -lssl -lcrypto -lws2_32
+LINK_FLAG_BACK = $(LIB_FLAG) -lssl -lcrypto -lws2_32 -lpthread
 LINK_FLAG_FRONT = -Wall -Werror
 
 # src files path
