@@ -380,7 +380,7 @@ BOOL read_scanner(HANDLE hcomm, DWORD event_mask, char *buf, size_t size)
         }
 
         buf[i++] = tmp_ch;
-    } while (bytes_read && i < size);
+    } while (bytes_read && i < size && buf[i - 1] != '\n' && buf[i - 1] != '\r');
 
     buf[i - 1] = 0;
 
