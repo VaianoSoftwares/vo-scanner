@@ -36,7 +36,9 @@
 #define DEFAULT_HOSTNAME "127.0.0.1"
 #define DEFAULT_SERVER_PORT 4317
 
-#define NMIN_COM 33
+#ifndef NMIN_COM
+#define NMIN_COM 1
+#endif /* NMIN_COM */
 #define NMAX_COM 255
 #define INVALID_COM_NUM 0
 #define COM_PORT_FORMAT "\\\\.\\COM%hhu"

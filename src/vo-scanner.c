@@ -91,9 +91,9 @@ void *send_timbra_reqs(void *vargp)
     const char *password = ((ThreadParams *)vargp)->password;
     const char *user_agent = ((ThreadParams *)vargp)->user_agent;
 
-    DWORD uname_size = MAX_COMPUTERNAME_LENGTH + 1;
+    DWORD uname_size = 65;
     char username[uname_size];
-    if (!GetComputerName(username, &uname_size))
+    if (!GetUserName(username, &uname_size))
         throw_err("GetComputerName");
 
     char cookies[1024];

@@ -14,6 +14,7 @@ EXEC_FILENAME = vo-scanner.exe
 # compiler flags
 INC_FLAG = $(addprefix -I,$(INC_DIR))
 CFLAG = $(INC_FLAG) -MMD -MP -g
+# -DNMIN_COM=33
 
 # linker flags
 LIB_FLAG = $(addprefix -L,$(LIB_DIR))
