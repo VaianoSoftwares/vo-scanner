@@ -26,12 +26,14 @@
         exit(GetLastError());                                 \
     } while (0)
 
+#ifdef DEBUG
 #define print_debug(fmt, ...)                                 \
     do                                                        \
     {                                                         \
         fprintf(stderr, "[DEBUG]%s:%d:%s(): " fmt "\n",       \
                 __FILE__, __LINE__, __func__, ##__VA_ARGS__); \
     } while (0)
+#endif /*DEBUG*/
 
 #define DEFAULT_HOSTNAME "127.0.0.1"
 #define DEFAULT_SERVER_PORT 4317
@@ -71,13 +73,28 @@
 #define SCAN_BUF_SIZE 15
 #define TIMBRA_LOG_ROW_FMT "{\"badge_cod\":\"%s\",\"post_id\":%u,\"created_at\":\"%s\"},"
 
-typedef struct ThreadParams
+#define TIMER_ID 1
+
+typedef struct ReqsThreadParams
 {
     char *hostname;
     uint16_t port;
     char *password;
     char *user_agent;
-} ThreadParams;
+} ReqsThreadParams;
+
+typedef struct LogThreadParams
+{
+    uint32_t postazione_id;
+} LogThreadParams;
+
+typedef struct PopupInfo
+{
+    char inner_text[64];
+    COLORREF bg_color;
+    HFONT font;
+    HWND hwnd;
+} PopupInfo;
 
 uint8_t find_serial_port(HANDLE *hcom);
 uint8_t open_serial_port(HANDLE *hcom, DWORD *event_mask);
@@ -86,12 +103,16 @@ BOOL read_scanner(HANDLE hcom, DWORD event_mask, char *buf, size_t size);
 void timestamp(char *buf);
 void show_certs(SSL *ssl);
 SSL_CTX *init_CTX(void);
+BOOL resolve_domain(const char *hostname, char *ipv4_str, size_t ipv4_str_size);
 SOCKET conn_to_server(const char *hostname, const uint16_t port);
 void *send_timbra_reqs(void *tparams);
-void timbra_logger(const uint32_t postazione_id);
+void *timbra_logger(void *tparams);
+void popup_manager();
+LRESULT CALLBACK window_proc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 BOOL get_cookies(char *buf, size_t size);
 BOOL save_cookies(char *src, size_t src_size, char *dest, size_t dest_size);
 BOOL read_timbra_log(char *buf, size_t size);
 uint16_t get_response_status(char *res);
 BOOL empty_timbra_log(void);
+BOOL is_badge_code_valid(const char *code_str, const size_t code_str_size);
 int main(int argc, char **argv);

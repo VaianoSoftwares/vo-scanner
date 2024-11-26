@@ -6,35 +6,49 @@ static pthread_mutex_t log_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t send_req_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t send_req_cond = PTHREAD_COND_INITIALIZER;
 
+PopupInfo popup_info = {0};
+
 int main(int argc, char **argv)
 {
     if (argc < 3)
         throw_err("usage: %s <password> <postazioneId> <hostname> <port>", argv[0]);
 
-    ThreadParams tparams = {
-        .hostname = argc > 3 ? argv[3] : DEFAULT_HOSTNAME,
+    char hostname[NI_MAXHOST];
+    if (!resolve_domain(argc > 3 ? argv[3] : DEFAULT_HOSTNAME, hostname, sizeof(hostname)))
+        throw_err("resolve_domain");
+
+    ReqsThreadParams reqs_params = {
+        .hostname = hostname,
         .port = argc > 4 ? (uint16_t)atoi(argv[4]) : DEFAULT_SERVER_PORT,
         .password = argv[1],
         .user_agent = argv[0]};
+    LogThreadParams log_params = {
+        .postazione_id = (uint32_t)atoi(argv[2])};
 
     CreateDirectory("data", NULL);
 
-    pthread_t pid;
-    if (pthread_create(&pid, NULL, send_timbra_reqs, (void *)&tparams))
-        throw_err("pthread_create");
+    pthread_t reqs_pid;
+    if (pthread_create(&reqs_pid, NULL, send_timbra_reqs, (void *)&reqs_params))
+        throw_err("pthread_create reqs");
+    pthread_t logger_pid;
+    if (pthread_create(&logger_pid, NULL, timbra_logger, (void *)&log_params))
+        throw_err("pthread_create logger");
 
-    timbra_logger((uint32_t)atoi(argv[2]));
+    popup_manager();
 
     puts("Waiting for children.");
-    pthread_join(pid, NULL);
+    pthread_join(reqs_pid, NULL);
+    pthread_join(logger_pid, NULL);
 
     puts("Execution terminated.");
 
     return EXIT_SUCCESS;
 }
 
-void timbra_logger(const uint32_t postazione_id)
+void *timbra_logger(void *tparams)
 {
+    const uint32_t postazione_id = ((LogThreadParams *)tparams)->postazione_id;
+
     HANDLE hcomm = INVALID_HANDLE_VALUE;
     DWORD event_mask;
     uint8_t ncomm = INVALID_COM_NUM;
@@ -62,6 +76,16 @@ void timbra_logger(const uint32_t postazione_id)
         }
 
         printf("Code has been read from device (COM%hhu): %s\n", ncomm, scan_buf);
+        if (!is_badge_code_valid(scan_buf, strlen(scan_buf)))
+        {
+            print_err("Badge Code %s has been rejected. Invalid Code.", scan_buf);
+
+            strcpy(popup_info.inner_text, "Impossibile Timbrare Badge\nCodice Non Valido");
+            popup_info.bg_color = RGB(255, 0, 0);
+            SendMessage(popup_info.hwnd, WM_USER, 0, 0);
+
+            continue;
+        }
 
         pthread_mutex_lock(&log_mutex);
 
@@ -74,6 +98,10 @@ void timbra_logger(const uint32_t postazione_id)
         fprintf_s(timbra_log, TIMBRA_LOG_ROW_FMT, scan_buf, postazione_id, date_str);
         fclose(timbra_log);
 
+        strcpy(popup_info.inner_text, "Badge Timbrato con Successo");
+        popup_info.bg_color = RGB(0, 255, 0);
+        SendMessage(popup_info.hwnd, WM_USER, 0, 0);
+
         pthread_mutex_unlock(&log_mutex);
 
         pthread_mutex_lock(&send_req_mutex);
@@ -82,14 +110,16 @@ void timbra_logger(const uint32_t postazione_id)
     }
 
     close_com(hcomm);
+
+    return NULL;
 }
 
 void *send_timbra_reqs(void *vargp)
 {
-    const char *hostname = ((ThreadParams *)vargp)->hostname;
-    const uint16_t port = ((ThreadParams *)vargp)->port;
-    const char *password = ((ThreadParams *)vargp)->password;
-    const char *user_agent = ((ThreadParams *)vargp)->user_agent;
+    const char *hostname = ((ReqsThreadParams *)vargp)->hostname;
+    const uint16_t port = ((ReqsThreadParams *)vargp)->port;
+    const char *password = ((ReqsThreadParams *)vargp)->password;
+    const char *user_agent = ((ReqsThreadParams *)vargp)->user_agent;
 
     DWORD uname_size = 65;
     char username[uname_size];
@@ -175,7 +205,7 @@ void *send_timbra_reqs(void *vargp)
             if (!has_cookies)
             {
                 print_err("save_cookies");
-                Sleep(4 * 1000);
+                Sleep(4000);
                 continue;
             }
 
@@ -256,6 +286,92 @@ void *send_timbra_reqs(void *vargp)
     }
 
     return NULL;
+}
+
+void popup_manager()
+{
+    static const char CLASS_NAME[] = "popup";
+
+    WNDCLASS wc;
+    memset(&wc, 0, sizeof(WNDCLASS));
+    wc.lpfnWndProc = window_proc;
+    wc.hInstance = NULL;
+    wc.lpszClassName = CLASS_NAME;
+    wc.hCursor = LoadCursor(NULL, IDC_ARROW);
+    wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
+
+    RegisterClass(&wc);
+
+    strcpy(popup_info.inner_text, "");
+    popup_info.bg_color = RGB(0, 0, 0);
+    popup_info.font = CreateFont(40, 0, 0, 0, FW_DONTCARE, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_OUTLINE_PRECIS,
+                                 CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, VARIABLE_PITCH, NULL);
+    popup_info.hwnd = CreateWindow(
+        CLASS_NAME,
+        "VeroOpen",
+        WS_OVERLAPPED | WS_CAPTION | WS_MINIMIZEBOX,
+        CW_USEDEFAULT, CW_USEDEFAULT, 600, 150,
+        NULL,
+        NULL,
+        NULL,
+        NULL);
+    if (popup_info.hwnd == NULL)
+        throw_err("CreateWindow");
+
+    MSG msg = {};
+    while (GetMessage(&msg, NULL, 0, 0) > 0)
+    {
+        TranslateMessage(&msg);
+        DispatchMessage(&msg);
+    }
+}
+
+LRESULT CALLBACK window_proc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
+{
+    PAINTSTRUCT ps;
+    RECT rect;
+    HDC hdc;
+    HFONT font;
+
+    switch (uMsg)
+    {
+    case WM_DESTROY:
+        PostQuitMessage(0);
+        return 0;
+
+    case WM_PAINT:
+    {
+        const size_t txt_len = strlen(popup_info.inner_text);
+
+        hdc = BeginPaint(hwnd, &ps);
+
+        SelectObject(hdc, popup_info.font);
+
+        GetClientRect(hwnd, &rect);
+        FillRect(hdc, &rect, CreateSolidBrush(popup_info.bg_color));
+
+        SetBkColor(hdc, popup_info.bg_color);
+        DrawText(hdc, popup_info.inner_text, txt_len, &rect, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+
+        EndPaint(hwnd, &ps);
+    }
+        return 0;
+
+    case WM_CLOSE:
+    case WM_TIMER:
+        ShowWindow(hwnd, SW_HIDE);
+        KillTimer(hwnd, TIMER_ID);
+        return 0;
+
+    case WM_USER:
+        KillTimer(hwnd, TIMER_ID);
+        InvalidateRect(hwnd, NULL, TRUE);
+        ShowWindow(hwnd, SW_NORMAL);
+        PlaySound((LPCTSTR)SND_ALIAS_SYSTEMSTART, NULL, SND_ALIAS_ID);
+        SetTimer(hwnd, TIMER_ID, 5000, NULL);
+        return 0;
+    }
+    return DefWindowProc(hwnd, uMsg, wParam, lParam);
 }
 
 uint8_t find_serial_port(HANDLE *hcomm)
@@ -379,7 +495,7 @@ BOOL read_scanner(HANDLE hcomm, DWORD event_mask, char *buf, size_t size)
             return FALSE;
         }
 
-        if (tmp_ch >= '0' && tmp_ch <= '9')
+        if (tmp_ch >= 33 && tmp_ch <= 126)
             buf[i++] = tmp_ch;
     } while (bytes_read && i < size && buf[i - 1] != '\n' && buf[i - 1] != '\r');
 
@@ -432,6 +548,46 @@ void show_certs(SSL *ssl)
     printf("Issuer: %s\n", line);
     free(line);
     X509_free(cert);
+}
+
+BOOL resolve_domain(const char *hostname, char *ipv4_str, size_t ipv4_str_size)
+{
+    WSADATA wsa;
+    if (WSAStartup(MAKEWORD(2, 2), &wsa) != NO_ERROR)
+    {
+        print_err("WSAStartup. Error Code : %d.", WSAGetLastError());
+        return FALSE;
+    }
+
+    struct addrinfo hints;
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = SOCK_STREAM;
+
+    struct addrinfo *result;
+    if (GetAddrInfo(hostname, NULL, &hints, &result))
+    {
+        print_err("GetAddrInfo. Error Code: %d", WSAGetLastError());
+        WSACleanup();
+        return FALSE;
+    };
+
+    for (struct addrinfo *res_ptr = result; res_ptr; res_ptr = res_ptr->ai_next)
+    {
+        struct sockaddr_in *ipv4 = (struct sockaddr_in *)res_ptr->ai_addr;
+        void *addr = &(ipv4->sin_addr);
+        if (inet_ntop(AF_INET, addr, ipv4_str, ipv4_str_size))
+        {
+            printf("Successfully resolved IPv4 address %s from domain name %s\n", ipv4_str, hostname);
+            freeaddrinfo(result);
+            WSACleanup();
+            return TRUE;
+        };
+    }
+
+    print_err("Failed to resolve an IPv4 address from domain name %s", hostname);
+    freeaddrinfo(result);
+    WSACleanup();
+    return FALSE;
 }
 
 SOCKET conn_to_server(const char *hostname, const uint16_t port)
@@ -603,4 +759,34 @@ uint16_t get_response_status(char *res)
 
     sscanf_s(str_ptr, "%hu", &status_code);
     return status_code;
+}
+
+BOOL is_badge_code_valid(const char *code_str, const size_t code_str_size)
+{
+    static const uint8_t CODE_LEN = 10;
+    static const char VALID_PREFIXIES[] = {'0', '1', '2'};
+    static const uint8_t VALID_PREF_SIZE = sizeof(VALID_PREFIXIES) / sizeof(VALID_PREFIXIES[0]);
+
+    if (strlen(code_str) != CODE_LEN)
+        return FALSE;
+
+    BOOL has_valid_pref = FALSE;
+    for (uint8_t i = 0; i < VALID_PREF_SIZE; ++i)
+    {
+        if (code_str[0] == VALID_PREFIXIES[i])
+        {
+            has_valid_pref = TRUE;
+            break;
+        }
+    }
+    if (!has_valid_pref)
+        return FALSE;
+
+    for (uint8_t i = 1; i < CODE_LEN; ++i)
+    {
+        if (code_str[i] < '0' || code_str[i] > '9')
+            return FALSE;
+    }
+
+    return TRUE;
 }
