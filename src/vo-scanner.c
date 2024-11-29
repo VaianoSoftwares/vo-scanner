@@ -80,7 +80,7 @@ void *timbra_logger(void *tparams)
         {
             print_err("Badge Code %s has been rejected. Invalid Code.", scan_buf);
 
-            strcpy(popup_info.inner_text, "Impossibile Timbrare Badge\nCodice Non Valido");
+            strcpy(popup_info.inner_text, "Impossibile Timbrare Badge\n\nCodice Non Valido");
             popup_info.bg_color = RGB(255, 0, 0);
             SendMessage(popup_info.hwnd, WM_USER, 0, 0);
 
@@ -351,7 +351,7 @@ LRESULT CALLBACK window_proc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
         FillRect(hdc, &rect, CreateSolidBrush(popup_info.bg_color));
 
         SetBkColor(hdc, popup_info.bg_color);
-        DrawText(hdc, popup_info.inner_text, txt_len, &rect, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+        DrawText(hdc, popup_info.inner_text, txt_len, &rect, DT_CENTER | DT_VCENTER);
 
         EndPaint(hwnd, &ps);
     }
@@ -497,9 +497,9 @@ BOOL read_scanner(HANDLE hcomm, DWORD event_mask, char *buf, size_t size)
 
         if (tmp_ch >= 33 && tmp_ch <= 126)
             buf[i++] = tmp_ch;
-    } while (bytes_read && i < size && buf[i - 1] != '\n' && buf[i - 1] != '\r');
+    } while (bytes_read && i < size && buf[i] != '\n' && buf[i] != '\r');
 
-    buf[i - 1] = 0;
+    buf[i] = 0;
 
     return TRUE;
 }
@@ -764,7 +764,7 @@ uint16_t get_response_status(char *res)
 BOOL is_badge_code_valid(const char *code_str, const size_t code_str_size)
 {
     static const uint8_t CODE_LEN = 10;
-    static const char VALID_PREFIXIES[] = {'0', '1', '2'};
+    static const char VALID_PREFIXIES[][2] = {"01", "11"};
     static const uint8_t VALID_PREF_SIZE = sizeof(VALID_PREFIXIES) / sizeof(VALID_PREFIXIES[0]);
 
     if (strlen(code_str) != CODE_LEN)
@@ -773,7 +773,7 @@ BOOL is_badge_code_valid(const char *code_str, const size_t code_str_size)
     BOOL has_valid_pref = FALSE;
     for (uint8_t i = 0; i < VALID_PREF_SIZE; ++i)
     {
-        if (code_str[0] == VALID_PREFIXIES[i])
+        if (!strncmp(code_str, VALID_PREFIXIES[i], sizeof(VALID_PREFIXIES[i])))
         {
             has_valid_pref = TRUE;
             break;
