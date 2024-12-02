@@ -8,18 +8,29 @@ static pthread_cond_t send_req_cond = PTHREAD_COND_INITIALIZER;
 
 PopupInfo popup_info = {0};
 
-int main(int argc, char **argv)
+int main(int argc, char *argv[])
 {
     if (argc < 3)
-        throw_err("usage: %s <password> <postazioneId> <hostname> <port>", argv[0]);
+        throw_err("usage: %s <password> <postazioneId> <hostname> <port> <username>", argv[0]);
 
     char hostname[NI_MAXHOST];
     if (!resolve_domain(argc > 3 ? argv[3] : DEFAULT_HOSTNAME, hostname, sizeof(hostname)))
         throw_err("resolve_domain");
 
+    DWORD UNAME_MAX_LEN = 65;
+    char username[UNAME_MAX_LEN];
+    if (argc > 5)
+    {
+        size_t uname_len = strlen(argv[5]);
+        strncpy(username, argv[5], uname_len < UNAME_MAX_LEN ? uname_len : UNAME_MAX_LEN);
+    }
+    else if (!GetUserName(username, &UNAME_MAX_LEN))
+        throw_err("GetComputerName");
+
     ReqsThreadParams reqs_params = {
+        .port = argc > 4 ? (uint16_t)atoi(argv[4]) : DEFAULT_HTTPS_SERVER_PORT,
         .hostname = hostname,
-        .port = argc > 4 ? (uint16_t)atoi(argv[4]) : DEFAULT_SERVER_PORT,
+        .username = username,
         .password = argv[1],
         .user_agent = argv[0]};
     LogThreadParams log_params = {
@@ -76,13 +87,18 @@ void *timbra_logger(void *tparams)
         }
 
         printf("Code has been read from device (COM%hhu): %s\n", ncomm, scan_buf);
-        if (!is_badge_code_valid(scan_buf, strlen(scan_buf)))
+
+        uint8_t scan_buf_len = strlen(scan_buf);
+        if (!is_badge_code_valid(scan_buf, scan_buf_len))
         {
             print_err("Badge Code %s has been rejected. Invalid Code.", scan_buf);
 
-            strcpy(popup_info.inner_text, "Impossibile Timbrare Badge\n\nCodice Non Valido");
-            popup_info.bg_color = RGB(255, 0, 0);
-            SendMessage(popup_info.hwnd, WM_USER, 0, 0);
+            if (scan_buf_len)
+            {
+                strcpy(popup_info.inner_text, "Impossibile Timbrare Badge\n\nCodice Non Valido");
+                popup_info.bg_color = RGB(255, 0, 0);
+                SendMessage(popup_info.hwnd, WM_USER, 0, 0);
+            }
 
             continue;
         }
@@ -116,22 +132,15 @@ void *timbra_logger(void *tparams)
 
 void *send_timbra_reqs(void *vargp)
 {
-    const char *hostname = ((ReqsThreadParams *)vargp)->hostname;
     const uint16_t port = ((ReqsThreadParams *)vargp)->port;
+    const char *hostname = ((ReqsThreadParams *)vargp)->hostname;
+    const char *username = ((ReqsThreadParams *)vargp)->username;
     const char *password = ((ReqsThreadParams *)vargp)->password;
     const char *user_agent = ((ReqsThreadParams *)vargp)->user_agent;
 
-    DWORD uname_size = 65;
-    char username[uname_size];
-    if (!GetUserName(username, &uname_size))
-        throw_err("GetComputerName");
-
     char cookies[1024];
     BOOL has_cookies = get_cookies(cookies, sizeof(cookies));
-    if (has_cookies)
-        puts("Cookies acquired");
-    else
-        puts("No cookies available");
+    puts(has_cookies ? "Cookies acquired" : "No cookies available");
 
     SSL_library_init();
 

@@ -13,7 +13,7 @@ EXEC_FILENAME = vo-scanner.exe
 
 # compiler flags
 INC_FLAG = $(addprefix -I,$(INC_DIR))
-CFLAG = $(INC_FLAG) -MMD -MP -g
+CFLAG = $(INC_FLAG) -MMD -MP -g -DNMIN_COM=33
 
 # RELEASE_FLAG = -O2
 # DEBUG_FLAG = -g -DNMIN_COM=33

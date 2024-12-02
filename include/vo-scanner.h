@@ -26,17 +26,16 @@
         exit(GetLastError());                                 \
     } while (0)
 
-#ifdef DEBUG
 #define print_debug(fmt, ...)                                 \
     do                                                        \
     {                                                         \
         fprintf(stderr, "[DEBUG]%s:%d:%s(): " fmt "\n",       \
                 __FILE__, __LINE__, __func__, ##__VA_ARGS__); \
     } while (0)
-#endif /*DEBUG*/
 
 #define DEFAULT_HOSTNAME "127.0.0.1"
-#define DEFAULT_SERVER_PORT 4317
+#define DEFAULT_HTTP_SERVER_PORT 4316
+#define DEFAULT_HTTPS_SERVER_PORT 4317
 
 #ifndef NMIN_COM
 #define NMIN_COM 1
@@ -77,9 +76,10 @@
 
 typedef struct ReqsThreadParams
 {
-    char *hostname;
     uint16_t port;
+    char *hostname;
     char *password;
+    char *username;
     char *user_agent;
 } ReqsThreadParams;
 
