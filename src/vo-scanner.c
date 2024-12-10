@@ -64,7 +64,7 @@ void *timbra_logger(void *tparams)
     DWORD event_mask;
     uint8_t ncomm = INVALID_COM_NUM;
 
-    while (TRUE)
+    while (true)
     {
         if (hcomm == INVALID_HANDLE_VALUE)
         {
@@ -78,7 +78,7 @@ void *timbra_logger(void *tparams)
             printf("Device connected to COM%hhu\n", ncomm);
         }
 
-        char scan_buf[SCAN_BUF_SIZE];
+        char scan_buf[256];
         if (!read_scanner(hcomm, event_mask, scan_buf, sizeof(scan_buf)))
         {
             print_err("read_scanner (COM%hhu)", ncomm);
@@ -88,12 +88,12 @@ void *timbra_logger(void *tparams)
 
         printf("Code has been read from device (COM%hhu): %s\n", ncomm, scan_buf);
 
-        uint8_t scan_buf_len = strlen(scan_buf);
-        if (!is_badge_code_valid(scan_buf, scan_buf_len))
+        ScanData scan_data = {0};
+        if (!parse_scan_data(scan_buf, &scan_data))
         {
             print_err("Badge Code %s has been rejected. Invalid Code.", scan_buf);
 
-            if (scan_buf_len)
+            if (strlen(scan_buf))
             {
                 strcpy(popup_info.inner_text, "Impossibile Timbrare Badge\n\nCodice Non Valido");
                 popup_info.bg_color = RGB(255, 0, 0);
@@ -111,10 +111,16 @@ void *timbra_logger(void *tparams)
 
         char date_str[26];
         timestamp(date_str);
-        fprintf_s(timbra_log, TIMBRA_LOG_ROW_FMT, scan_buf, postazione_id, date_str);
+        fprintf_s(timbra_log, TIMBRA_LOG_ROW_FMT, scan_data.code, postazione_id, date_str);
         fclose(timbra_log);
 
-        strcpy(popup_info.inner_text, "Badge Timbrato con Successo");
+        PlaySound(NULL, 0, 0);
+        PlaySound(scan_data.mark_in ? BEEP_IN : BEEP_OUT, NULL, SND_FILENAME | SND_ASYNC);
+
+        char popup_msg[128];
+        sprintf(popup_info.inner_text, "Badge Timbrato con Successo\n\n%s %s %s Struttura",
+                scan_data.name, scan_data.surname, scan_data.mark_in ? "Entra In" : "Esce Da");
+        strncpy(popup_info.inner_text, popup_msg, min(strlen(popup_msg), sizeof(popup_info.inner_text) - 1));
         popup_info.bg_color = RGB(0, 255, 0);
         SendMessage(popup_info.hwnd, WM_USER, 0, 0);
 
@@ -139,7 +145,7 @@ void *send_timbra_reqs(void *vargp)
     const char *user_agent = ((ReqsThreadParams *)vargp)->user_agent;
 
     char cookies[1024];
-    BOOL has_cookies = get_cookies(cookies, sizeof(cookies));
+    bool has_cookies = get_cookies(cookies, sizeof(cookies));
     puts(has_cookies ? "Cookies acquired" : "No cookies available");
 
     SSL_library_init();
@@ -150,9 +156,9 @@ void *send_timbra_reqs(void *vargp)
 
     SOCKET sock = INVALID_SOCKET;
     SSL *ssl = NULL;
-    BOOL connected = FALSE;
+    bool connected = false;
 
-    while (TRUE)
+    while (true)
     {
         if (!connected)
         {
@@ -172,7 +178,7 @@ void *send_timbra_reqs(void *vargp)
             show_certs(ssl);
             puts("----------------------------------------------------------------------------------------------------------");
 
-            connected = TRUE;
+            connected = true;
         }
 
         char req_buf[SO_MAX_MSG_SIZE], res_buf[SO_MAX_MSG_SIZE], msg_body[SO_MAX_MSG_SIZE];
@@ -192,7 +198,7 @@ void *send_timbra_reqs(void *vargp)
             {
                 ERR_print_errors_fp(stderr);
                 print_err("Unable to send login request.");
-                connected = FALSE;
+                connected = false;
                 continue;
             }
 
@@ -200,7 +206,7 @@ void *send_timbra_reqs(void *vargp)
             {
                 ERR_print_errors_fp(stderr);
                 print_err("No response. (nbytes=%d)", nbytes);
-                connected = FALSE;
+                connected = false;
                 continue;
             }
             res_buf[nbytes] = '\0';
@@ -249,7 +255,7 @@ void *send_timbra_reqs(void *vargp)
             print_err("Unable to send request.");
             pthread_mutex_unlock(&log_mutex);
             pthread_mutex_unlock(&send_req_mutex);
-            connected = FALSE;
+            connected = false;
             continue;
         }
 
@@ -260,7 +266,7 @@ void *send_timbra_reqs(void *vargp)
             print_err("No response. (nbytes=%d)", nbytes);
             pthread_mutex_unlock(&log_mutex);
             pthread_mutex_unlock(&send_req_mutex);
-            connected = FALSE;
+            connected = false;
             continue;
         }
         res_buf[nbytes] = '\0';
@@ -275,7 +281,7 @@ void *send_timbra_reqs(void *vargp)
         {
         case UNAUTHORIZED_STATUS_CODE:
         case FORBIDDEN_STATUS_CODE:
-            has_cookies = FALSE;
+            has_cookies = false;
             print_err("Timbra requests have been rejected. Status code: %hu", status_code);
             break;
         case SUCCESS_STATUS_CODE:
@@ -313,7 +319,7 @@ void popup_manager()
 
     strcpy(popup_info.inner_text, "");
     popup_info.bg_color = RGB(0, 0, 0);
-    popup_info.font = CreateFont(40, 0, 0, 0, FW_DONTCARE, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_OUTLINE_PRECIS,
+    popup_info.font = CreateFont(40, 0, 0, 0, FW_DONTCARE, false, false, false, DEFAULT_CHARSET, OUT_OUTLINE_PRECIS,
                                  CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, VARIABLE_PITCH, NULL);
     popup_info.hwnd = CreateWindow(
         CLASS_NAME,
@@ -374,7 +380,7 @@ LRESULT CALLBACK window_proc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 
     case WM_USER:
         KillTimer(hwnd, TIMER_ID);
-        InvalidateRect(hwnd, NULL, TRUE);
+        InvalidateRect(hwnd, NULL, true);
         ShowWindow(hwnd, SW_NORMAL);
         PlaySound((LPCTSTR)SND_ALIAS_SYSTEMSTART, NULL, SND_ALIAS_ID);
         SetTimer(hwnd, TIMER_ID, 5000, NULL);
@@ -480,14 +486,14 @@ void close_com(HANDLE *hcomm)
     *hcomm = INVALID_HANDLE_VALUE;
 }
 
-BOOL read_scanner(HANDLE hcomm, DWORD event_mask, char *buf, size_t size)
+bool read_scanner(HANDLE hcomm, DWORD event_mask, char *buf, size_t size)
 {
 
     if (!WaitCommEvent(hcomm, &event_mask, NULL))
     {
         print_err("WaitCommEvent");
         close_com(&hcomm);
-        return FALSE;
+        return false;
     }
 
     char tmp_ch;
@@ -501,7 +507,7 @@ BOOL read_scanner(HANDLE hcomm, DWORD event_mask, char *buf, size_t size)
         {
             print_err("ReadFile");
             close_com(&hcomm);
-            return FALSE;
+            return false;
         }
 
         if (tmp_ch >= 33 && tmp_ch <= 126)
@@ -510,7 +516,7 @@ BOOL read_scanner(HANDLE hcomm, DWORD event_mask, char *buf, size_t size)
 
     buf[i] = 0;
 
-    return TRUE;
+    return true;
 }
 
 void timestamp(char *buf)
@@ -559,13 +565,13 @@ void show_certs(SSL *ssl)
     X509_free(cert);
 }
 
-BOOL resolve_domain(const char *hostname, char *ipv4_str, size_t ipv4_str_size)
+bool resolve_domain(const char *hostname, char *ipv4_str, size_t ipv4_str_size)
 {
     WSADATA wsa;
     if (WSAStartup(MAKEWORD(2, 2), &wsa) != NO_ERROR)
     {
         print_err("WSAStartup. Error Code : %d.", WSAGetLastError());
-        return FALSE;
+        return false;
     }
 
     struct addrinfo hints;
@@ -578,7 +584,7 @@ BOOL resolve_domain(const char *hostname, char *ipv4_str, size_t ipv4_str_size)
     {
         print_err("GetAddrInfo. Error Code: %d", WSAGetLastError());
         WSACleanup();
-        return FALSE;
+        return false;
     };
 
     for (struct addrinfo *res_ptr = result; res_ptr; res_ptr = res_ptr->ai_next)
@@ -590,14 +596,14 @@ BOOL resolve_domain(const char *hostname, char *ipv4_str, size_t ipv4_str_size)
             printf("Successfully resolved IPv4 address %s from domain name %s\n", ipv4_str, hostname);
             freeaddrinfo(result);
             WSACleanup();
-            return TRUE;
+            return true;
         };
     }
 
     print_err("Failed to resolve an IPv4 address from domain name %s", hostname);
     freeaddrinfo(result);
     WSACleanup();
-    return FALSE;
+    return false;
 }
 
 SOCKET conn_to_server(const char *hostname, const uint16_t port)
@@ -629,7 +635,7 @@ SOCKET conn_to_server(const char *hostname, const uint16_t port)
     printf("Attempt connection to %s:%d.\n", hostname, port);
 
     // loop while connection is not enstablished
-    BOOL connected = FALSE;
+    bool connected = false;
     uint8_t ntries = 1;
     while (!connected && ntries < NMAX_CONN_TRIES)
     {
@@ -655,33 +661,33 @@ SOCKET conn_to_server(const char *hostname, const uint16_t port)
     return sock;
 }
 
-BOOL get_cookies(char *buf, size_t size)
+bool get_cookies(char *buf, size_t size)
 {
     FILE *cookie_jar;
     if (fopen_s(&cookie_jar, COOKIES_FILENAME, "r"))
     {
         print_err("fopen_s");
-        return FALSE;
+        return false;
     }
 
     if (!fgets(buf, size, cookie_jar))
     {
         print_err("fgets");
-        return FALSE;
+        return false;
     }
 
     fclose(cookie_jar);
 
-    return TRUE;
+    return true;
 }
 
-BOOL save_cookies(char *src, size_t src_size, char *dest, size_t dest_size)
+bool save_cookies(char *src, size_t src_size, char *dest, size_t dest_size)
 {
     char *str_ptr = strstr(src, "Set-Cookie: ");
     if (!str_ptr)
     {
         print_err("strstr");
-        return FALSE;
+        return false;
     }
 
     str_ptr = strtok(str_ptr, " ");
@@ -689,7 +695,7 @@ BOOL save_cookies(char *src, size_t src_size, char *dest, size_t dest_size)
     if (!str_ptr)
     {
         print_err("str_tok");
-        return FALSE;
+        return false;
     }
 
     if (strcpy_s(dest, dest_size, str_ptr))
@@ -704,17 +710,17 @@ BOOL save_cookies(char *src, size_t src_size, char *dest, size_t dest_size)
 
     fclose(cookie_jar);
 
-    return TRUE;
+    return true;
 }
 
-BOOL read_timbra_log(char *buf, size_t size)
+bool read_timbra_log(char *buf, size_t size)
 {
     FILE *timbra_log;
 
     if (fopen_s(&timbra_log, TIMBRA_LOG_FILENAME, "r"))
     {
         print_err("fopen_s");
-        return FALSE;
+        return false;
     }
 
     size_t i = 1;
@@ -728,10 +734,10 @@ BOOL read_timbra_log(char *buf, size_t size)
 
     fclose(timbra_log);
 
-    return TRUE;
+    return true;
 }
 
-BOOL empty_timbra_log(void)
+bool empty_timbra_log(void)
 {
     FILE *timbra_log;
     errno_t ret = fopen_s(&timbra_log, TIMBRA_LOG_FILENAME, "w");
@@ -771,32 +777,59 @@ uint16_t get_response_status(char *res)
     return status_code;
 }
 
-BOOL is_badge_code_valid(const char *code_str, const size_t code_str_size)
+bool parse_scan_data(char *buf, ScanData *out)
+{
+    static const char delim[] = "~";
+
+    char *str_token = strtok(buf, delim);
+    if (!str_token)
+        return false;
+
+    const uint8_t code_len = min(strlen(str_token), sizeof(out->code) - 1);
+    if (!is_badge_code_valid(buf, code_len))
+        return false;
+
+    strncpy(out->code, str_token, code_len);
+    out->code_len = code_len;
+    out->mark_in = out->code[0] == '0';
+
+    str_token = strtok(NULL, delim);
+    if (str_token)
+        strncpy(out->name, str_token, min(strlen(str_token), sizeof(out->name) - 1));
+
+    str_token = strtok(NULL, delim);
+    if (str_token)
+        strncpy(out->surname, str_token, min(strlen(str_token), sizeof(out->surname) - 1));
+
+    return true;
+}
+
+bool is_badge_code_valid(const char *code_str, const size_t code_str_size)
 {
     static const uint8_t CODE_LEN = 10;
     static const char VALID_PREFIXIES[][2] = {"01", "11"};
     static const uint8_t VALID_PREF_SIZE = sizeof(VALID_PREFIXIES) / sizeof(VALID_PREFIXIES[0]);
 
     if (strlen(code_str) != CODE_LEN)
-        return FALSE;
+        return false;
 
-    BOOL has_valid_pref = FALSE;
+    bool has_valid_pref = false;
     for (uint8_t i = 0; i < VALID_PREF_SIZE; ++i)
     {
         if (!strncmp(code_str, VALID_PREFIXIES[i], sizeof(VALID_PREFIXIES[i])))
         {
-            has_valid_pref = TRUE;
+            has_valid_pref = true;
             break;
         }
     }
     if (!has_valid_pref)
-        return FALSE;
+        return false;
 
     for (uint8_t i = 1; i < CODE_LEN; ++i)
     {
         if (code_str[i] < '0' || code_str[i] > '9')
-            return FALSE;
+            return false;
     }
 
-    return TRUE;
+    return true;
 }
