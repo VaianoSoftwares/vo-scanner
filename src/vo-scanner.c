@@ -779,7 +779,7 @@ uint16_t get_response_status(char *res)
 
 bool parse_scan_data(char *buf, ScanData *out)
 {
-    static const char delim[] = "~";
+    static const char delim[] = "-";
 
     char *str_token = strtok(buf, delim);
     if (!str_token)
