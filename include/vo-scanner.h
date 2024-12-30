@@ -90,9 +90,12 @@
 #define TIMBRA_LOG_ROW_FMT "{\"badge_cod\":\"%s\",\"post_id\":%u,\"created_at\":\"%s\"},"
 
 #define TIMER_ID 1
-#define BEEP_IN "res\\beep-07a.wav"
-#define BEEP_OUT "res\\beep-08b.wav"
-#define POPUP_MSG_SUCC_PREFIX "Badge Timbrato con Successo\n\n"
+#define BEEP_IN "res\\in.wav"
+#define BEEP_OUT "res\\out.wav"
+#define POPUP_MSG_SUCC_FMT "Badge Timbrato con Successo\n\n%s %s %s Struttura"
+#define POPUP_MSG_FAIL "Impossibile Timbrare Badge\n\nCodice Non Valido"
+#define WIN_WIDTH 650
+#define WIN_HEIGHT 250
 
 typedef struct ReqsThreadParams
 {

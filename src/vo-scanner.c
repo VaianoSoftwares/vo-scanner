@@ -60,33 +60,33 @@ void *timbra_logger(void *tparams)
 {
     const uint32_t postazione_id = ((LogThreadParams *)tparams)->postazione_id;
 
-    HANDLE hcomm = INVALID_HANDLE_VALUE;
+    HANDLE hcom = INVALID_HANDLE_VALUE;
     DWORD event_mask;
-    uint8_t ncomm = INVALID_COM_NUM;
+    uint8_t ncom = INVALID_COM_NUM;
 
     while (true)
     {
-        if (hcomm == INVALID_HANDLE_VALUE)
+        if (hcom == INVALID_HANDLE_VALUE)
         {
-            if (!(ncomm = open_serial_port(&hcomm, &event_mask)))
+            if (!(ncom = open_serial_port(&hcom, &event_mask)))
             {
                 print_err("open_serial_port");
                 Sleep(1000);
                 continue;
             }
 
-            printf("Device connected to COM%hhu\n", ncomm);
+            printf("Device connected to COM%hhu\n", ncom);
         }
 
         char scan_buf[256];
-        if (!read_scanner(hcomm, event_mask, scan_buf, sizeof(scan_buf)))
+        if (!read_scanner(hcom, event_mask, scan_buf, sizeof(scan_buf)))
         {
-            print_err("read_scanner (COM%hhu)", ncomm);
-            close_com(hcomm);
+            print_err("read_scanner (COM%hhu)", ncom);
+            close_com(hcom);
             continue;
         }
 
-        printf("Code has been read from device (COM%hhu): %s\n", ncomm, scan_buf);
+        printf("Code has been read from device (COM%hhu): %s\n", ncom, scan_buf);
 
         ScanData scan_data = {0};
         if (!parse_scan_data(scan_buf, &scan_data))
@@ -95,7 +95,7 @@ void *timbra_logger(void *tparams)
 
             if (strlen(scan_buf))
             {
-                strcpy(popup_info.inner_text, "Impossibile Timbrare Badge\n\nCodice Non Valido");
+                strcpy(popup_info.inner_text, POPUP_MSG_FAIL);
                 popup_info.bg_color = RGB(255, 0, 0);
                 SendMessage(popup_info.hwnd, WM_USER, 0, 0);
             }
@@ -114,13 +114,14 @@ void *timbra_logger(void *tparams)
         fprintf_s(timbra_log, TIMBRA_LOG_ROW_FMT, scan_data.code, postazione_id, date_str);
         fclose(timbra_log);
 
-        PlaySound(NULL, 0, 0);
         PlaySound(scan_data.mark_in ? BEEP_IN : BEEP_OUT, NULL, SND_FILENAME | SND_ASYNC);
 
-        char popup_msg[128];
-        sprintf(popup_info.inner_text, "Badge Timbrato con Successo\n\n%s %s %s Struttura",
-                scan_data.name, scan_data.surname, scan_data.mark_in ? "Entra In" : "Esce Da");
-        strncpy(popup_info.inner_text, popup_msg, min(strlen(popup_msg), sizeof(popup_info.inner_text) - 1));
+        char msg_suffix[10];
+        strcpy(msg_suffix, scan_data.mark_in ? "Entra In" : "Esce Da");
+        size_t popup_msg_len = sizeof(POPUP_MSG_SUCC_FMT) + strlen(scan_data.name) +
+                               strlen(scan_data.surname) + strlen(msg_suffix);
+        snprintf(popup_info.inner_text, popup_msg_len, POPUP_MSG_SUCC_FMT,
+                 scan_data.name, scan_data.surname, msg_suffix);
         popup_info.bg_color = RGB(0, 255, 0);
         SendMessage(popup_info.hwnd, WM_USER, 0, 0);
 
@@ -131,7 +132,7 @@ void *timbra_logger(void *tparams)
         pthread_mutex_unlock(&send_req_mutex);
     }
 
-    close_com(hcomm);
+    close_com(hcom);
 
     return NULL;
 }
@@ -319,13 +320,15 @@ void popup_manager()
 
     strcpy(popup_info.inner_text, "");
     popup_info.bg_color = RGB(0, 0, 0);
-    popup_info.font = CreateFont(40, 0, 0, 0, FW_DONTCARE, false, false, false, DEFAULT_CHARSET, OUT_OUTLINE_PRECIS,
+    popup_info.font = CreateFont(40, 0, 0, 0, FW_BOLD, false, false, false, DEFAULT_CHARSET, OUT_OUTLINE_PRECIS,
                                  CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, VARIABLE_PITCH, NULL);
+    if (popup_info.font == NULL)
+        throw_err("CreateFont");
     popup_info.hwnd = CreateWindow(
         CLASS_NAME,
         "VeroOpen",
         WS_OVERLAPPED | WS_CAPTION | WS_MINIMIZEBOX,
-        CW_USEDEFAULT, CW_USEDEFAULT, 600, 150,
+        CW_USEDEFAULT, CW_USEDEFAULT, WIN_WIDTH, WIN_HEIGHT,
         NULL,
         NULL,
         NULL,
@@ -347,6 +350,7 @@ LRESULT CALLBACK window_proc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
     RECT rect;
     HDC hdc;
     HFONT font;
+    DEVMODEA monitor;
 
     switch (uMsg)
     {
@@ -368,6 +372,17 @@ LRESULT CALLBACK window_proc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
         SetBkColor(hdc, popup_info.bg_color);
         DrawText(hdc, popup_info.inner_text, txt_len, &rect, DT_CENTER | DT_VCENTER);
 
+        if (EnumDisplaySettings(NULL, ENUM_CURRENT_SETTINGS, &monitor))
+        {
+            const uint16_t wposx = (monitor.dmPelsWidth - WIN_WIDTH) / 2;
+            const uint16_t wposy = (monitor.dmPelsHeight - WIN_HEIGHT) / 8;
+            MoveWindow(hwnd, wposx, wposy, WIN_WIDTH, WIN_HEIGHT, false);
+        }
+        else
+        {
+            print_err("EnumDisplaySettings");
+        }
+
         EndPaint(hwnd, &ps);
     }
         return 0;
@@ -382,117 +397,125 @@ LRESULT CALLBACK window_proc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
         KillTimer(hwnd, TIMER_ID);
         InvalidateRect(hwnd, NULL, true);
         ShowWindow(hwnd, SW_NORMAL);
-        PlaySound((LPCTSTR)SND_ALIAS_SYSTEMSTART, NULL, SND_ALIAS_ID);
         SetTimer(hwnd, TIMER_ID, 5000, NULL);
         return 0;
     }
     return DefWindowProc(hwnd, uMsg, wParam, lParam);
 }
 
-uint8_t find_serial_port(HANDLE *hcomm)
+uint8_t find_serial_port(HANDLE *hcom)
 {
-    char comm_name[16];
+    char com_name[16];
 
     for (uint8_t i = NMIN_COM; i && i <= NMAX_COM; ++i)
     {
-        _snprintf_s(comm_name, sizeof(comm_name), sizeof(comm_name) - 1, COM_PORT_FORMAT, i);
+        _snprintf_s(com_name, sizeof(com_name), sizeof(com_name) - 1, COM_PORT_FORMAT, i);
 
-        *hcomm = CreateFile(
-            comm_name,
+        *hcom = CreateFile(
+            com_name,
             GENERIC_READ | GENERIC_WRITE,
             0,
             NULL,
             OPEN_EXISTING,
-            FILE_ATTRIBUTE_NORMAL,
+            // FILE_ATTRIBUTE_NORMAL,
+            0,
             NULL);
 
-        if (*hcomm != INVALID_HANDLE_VALUE)
+        if (*hcom != INVALID_HANDLE_VALUE)
             return i;
 
-        close_com(hcomm);
+        close_com(hcom);
     }
 
     return INVALID_COM_NUM;
 }
 
-uint8_t open_serial_port(HANDLE *hcomm, DWORD *event_mask)
+uint8_t open_serial_port(HANDLE *hcom, DWORD *event_mask)
 {
-    uint8_t comm_num = find_serial_port(hcomm);
-    if (!comm_num)
+    uint8_t ncom = find_serial_port(hcom);
+    if (!ncom)
     {
-        close_com(hcomm);
+        close_com(hcom);
         print_err("find_serial_port");
         return INVALID_COM_NUM;
     }
 
-    if (!FlushFileBuffers(*hcomm))
+    if (!FlushFileBuffers(*hcom))
     {
-        close_com(hcomm);
+        close_com(hcom);
         print_err("FlushFileBuffers");
         return INVALID_COM_NUM;
     }
 
-    DCB dcb_serial_params = {0};
-    dcb_serial_params.DCBlength = sizeof(dcb_serial_params);
+    DCB dcb = {0};
+    dcb.DCBlength = sizeof(dcb);
 
-    if (!GetCommState(*hcomm, &dcb_serial_params))
+    if (!GetCommState(*hcom, &dcb))
     {
-        close_com(hcomm);
+        close_com(hcom);
         print_err("GetCommState");
         return INVALID_COM_NUM;
     }
 
-    dcb_serial_params.BaudRate = CBR_9600;
-    dcb_serial_params.ByteSize = 8;
-    dcb_serial_params.StopBits = ONESTOPBIT;
-    dcb_serial_params.Parity = NOPARITY;
+    dcb.BaudRate = CBR_9600;
+    dcb.ByteSize = 8;
+    dcb.StopBits = ONESTOPBIT;
+    dcb.Parity = NOPARITY;
 
-    if (!SetCommState(*hcomm, &dcb_serial_params))
+    if (!SetCommState(*hcom, &dcb))
     {
-        close_com(hcomm);
+        close_com(hcom);
         print_err("SetCommState");
         return INVALID_COM_NUM;
     }
 
     COMMTIMEOUTS timeouts = {0};
+
+    if (!GetCommTimeouts(*hcom, &timeouts))
+    {
+        close_com(hcom);
+        print_err("GetCommTimeouts");
+        return INVALID_COM_NUM;
+    }
+
     timeouts.ReadIntervalTimeout = MAXDWORD;
     timeouts.ReadTotalTimeoutConstant = 0;
     timeouts.ReadTotalTimeoutMultiplier = 0;
     timeouts.WriteTotalTimeoutConstant = 0;
     timeouts.WriteTotalTimeoutMultiplier = 0;
 
-    if (!SetCommTimeouts(*hcomm, &timeouts))
+    if (!SetCommTimeouts(*hcom, &timeouts))
     {
-        close_com(hcomm);
+        close_com(hcom);
         print_err("SetCommTimeouts");
         return INVALID_COM_NUM;
     }
 
     *event_mask = (DWORD)EV_RXCHAR;
-    if (!SetCommMask(*hcomm, *event_mask))
+    if (!SetCommMask(*hcom, *event_mask))
     {
-        close_com(hcomm);
+        close_com(hcom);
         print_err("SetCommMask");
         return INVALID_COM_NUM;
     }
 
-    return comm_num;
+    return ncom;
 }
 
-void close_com(HANDLE *hcomm)
+void close_com(HANDLE *hcom)
 {
-    if (*hcomm)
-        CloseHandle(*hcomm);
-    *hcomm = INVALID_HANDLE_VALUE;
+    if (*hcom && *hcom != INVALID_HANDLE_VALUE)
+        CloseHandle(*hcom);
+    *hcom = INVALID_HANDLE_VALUE;
 }
 
-bool read_scanner(HANDLE hcomm, DWORD event_mask, char *buf, size_t size)
+bool read_scanner(HANDLE hcom, DWORD event_mask, char *buf, size_t size)
 {
 
-    if (!WaitCommEvent(hcomm, &event_mask, NULL))
+    if (!WaitCommEvent(hcom, &event_mask, NULL))
     {
         print_err("WaitCommEvent");
-        close_com(&hcomm);
+        close_com(&hcom);
         return false;
     }
 
@@ -503,10 +526,10 @@ bool read_scanner(HANDLE hcomm, DWORD event_mask, char *buf, size_t size)
     {
         tmp_ch = 0;
 
-        if (!ReadFile(hcomm, &tmp_ch, sizeof(tmp_ch), &bytes_read, NULL))
+        if (!ReadFile(hcom, &tmp_ch, sizeof(tmp_ch), &bytes_read, NULL))
         {
             print_err("ReadFile");
-            close_com(&hcomm);
+            close_com(&hcom);
             return false;
         }
 
