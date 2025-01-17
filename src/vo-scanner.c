@@ -14,7 +14,16 @@ int main(int argc, char *argv[])
         throw_err("usage: %s <password> <postazioneId> <hostname> <port> <username>", argv[0]);
 
     char hostname[NI_MAXHOST];
-    if (!resolve_domain(argc > 3 ? argv[3] : DEFAULT_HOSTNAME, hostname, sizeof(hostname)))
+    char *in_hostname;
+    in_hostname = argc > 3 ? argv[3] : DEFAULT_HOSTNAME;
+    uint8_t tries = 0;
+    while (tries < NMAX_RES_DOMAIN_TRIES &&
+           !resolve_domain(in_hostname, hostname, sizeof(hostname)))
+    {
+        ++tries;
+        Sleep(1000);
+    }
+    if (tries >= NMAX_RES_DOMAIN_TRIES)
         throw_err("resolve_domain");
 
     DWORD UNAME_MAX_LEN = 65;
@@ -25,7 +34,7 @@ int main(int argc, char *argv[])
         strncpy(username, argv[5], uname_len < UNAME_MAX_LEN ? uname_len : UNAME_MAX_LEN);
     }
     else if (!GetUserName(username, &UNAME_MAX_LEN))
-        throw_err("GetComputerName");
+        throw_err("GetUserName");
 
     ReqsThreadParams reqs_params = {
         .port = argc > 4 ? (uint16_t)atoi(argv[4]) : DEFAULT_HTTPS_SERVER_PORT,

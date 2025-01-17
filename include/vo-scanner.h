@@ -89,6 +89,8 @@
 #define COOKIES_FILENAME "data\\cookies.txt"
 #define TIMBRA_LOG_ROW_FMT "{\"badge_cod\":\"%s\",\"post_id\":%u,\"created_at\":\"%s\"},"
 
+#define NMAX_RES_DOMAIN_TRIES 10
+
 #define TIMER_ID 1
 #define BEEP_IN "res\\in.wav"
 #define BEEP_OUT "res\\out.wav"
