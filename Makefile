@@ -1,52 +1,39 @@
-# compiler
 CC = x86_64-w64-mingw32-gcc
 
-# dirs pathnames
-INC_DIR = include /usr/x86_64-w64-mingw32/include
-LIB_DIR = lib /usr/x86_64-w64-mingw32/lib/openssl
-SRC_DIR = src
-BIN_DIR = bin
-OBJ_DIR = obj
+EXE = vo_scanner.exe
+SOURCES = main.c
+OBJS = $(addsuffix .o, $(basename $(notdir $(SOURCES))))
 
-# exec file name
-EXEC_FILENAME = vo-scanner.exe
+INC_PATHS = include /usr/x86_64-w64-mingw32/include
+LIB_PATHS = lib /usr/x86_64-w64-mingw32/lib/openssl
 
-# compiler flags
-INC_FLAG = $(addprefix -I,$(INC_DIR))
-CFLAG = $(INC_FLAG) -std=c17 -MMD -MP -g -DNMIN_COM=33
+INC_FLAGS = $(addprefix -I,$(INC_PATHS))
+LIB_FLAGS = $(addprefix -L,$(LIB_PATHS))
 
-# RELEASE_FLAG = -O2
-# DEBUG_FLAG = -g -DNMIN_COM=33
+CFLAGS = -std=c17
+CFLAGS += $(INC_FLAGS)
+CFLAGS += -g -Wall -Wformat -Wextra
+# CFLAGS += -Wpedantic
+CFLAGS += -Werror
+CFLAGS += -DNMIN_COM=33
+CFLAGS += -D_DEBUG_UNAME
+# CFLAGS += -O2
 
-# linker flags
-LIB_FLAG = $(addprefix -L,$(LIB_DIR))
-LINK_FLAG_BACK = $(LIB_FLAG) -lssl -lcrypto -lws2_32 -lpthread -lgdi32 -lwinmm
-LINK_FLAG_FRONT = -Wall -Werror
+LIBS = $(LIB_FLAGS)
+LIBS += -lssl -lcrypto -lws2_32 -lpthread -lgdi32 -lwinmm
 
-# src files path
-SRCS := $(shell find $(SRC_DIR) -name '*.c')
-# obj files path
-OBJS := $(SRCS:$(SRC_DIR)/%.c=$(OBJ_DIR)/%.o)
-# dep files path
-DEPS := $(OBJS:.o=.d)
+##---------------------------------------------------------------------
+## BUILD RULES
+##---------------------------------------------------------------------
 
-.PHONY: clean
+%.o:%.cpp
+	$(CC) $(CFLAGS) -c -o $@ $<
 
-# usage: make
-all: $(BIN_DIR)/$(EXEC_FILENAME)
+all: $(EXE)
+	@echo Build complete for MinGW
 
-# create exec file
-$(BIN_DIR)/$(EXEC_FILENAME): $(OBJS)
-	mkdir -p $(dir $@)
-	$(CC) $(LINK_FLAG_FRONT) $(OBJS) -o $@ $(LINK_FLAG_BACK)
+$(EXE): $(OBJS)
+	$(CC) -o $@ $^ $(CFLAGS) $(LIBS)
 
-# compile src files into obj files
-$(OBJ_DIR)/%.o: $(SRC_DIR)/%.c
-	mkdir -p $(dir $@)
-	$(CC) $(CFLAG) -c $< -o $@
-
-# usage: make clean
 clean:
-	rm -rf $(BIN_DIR) $(OBJ_DIR) &> /dev/null
-
--include $(DEPS)
+	rm -f $(EXE) $(OBJS)

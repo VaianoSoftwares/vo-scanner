@@ -5,9 +5,6 @@ vcpkg
 *.o
 *.d
 
-bin
-obj
-
 args
 *.txt
 *.json

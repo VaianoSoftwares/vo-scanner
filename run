@@ -1,2 +1,2 @@
 #!/bin/sh
-WINEPATH=/usr/x86_64-w64-mingw32/bin wine bin/vo-scanner.exe `cat data/args`
+WINEPATH=/usr/x86_64-w64-mingw32/bin wine vo_scanner.exe `cat data/args`
