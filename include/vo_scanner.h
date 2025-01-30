@@ -1,4 +1,5 @@
-/* vo-scanner.h */
+#ifndef VO_SCANNER_H_
+#define VO_SCANNER_H_
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -178,3 +179,5 @@ void timestamp(char *buf);
 LRESULT CALLBACK window_proc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 void parse_args(int argc, char **argv, ProgramArgs *args);
 int main(int argc, char **argv);
+
+#endif // VO_SCANNER_H_
