@@ -182,7 +182,13 @@ void *send_timbra_reqs(void *args)
         if (!send_req)
             pthread_cond_wait(&send_req_cond, &log_mutex);
 
-        int status_code = send_mark_req(ssl, hostname, cookies);
+        uint16_t status_code = 0;
+        if (!send_mark_req(ssl, hostname, cookies, &status_code))
+        {
+            print_err("Couldn't send mark request");
+            status_code = 0;
+        }
+
         switch (status_code)
         {
         case UNAUTHORIZED_STATUS_CODE:
@@ -652,14 +658,14 @@ bool send_login_req(SSL *ssl, const char *username, const char *password, const 
     // return false;
 }
 
-int16_t send_mark_req(SSL *ssl, const char *hostname, const char *cookies)
+bool send_mark_req(SSL *ssl, const char *hostname, const char *cookies, uint16_t *status_code)
 {
     char buf[SO_MAX_MSG_SIZE], msg_body[SO_MAX_MSG_SIZE - lengthof(TIMBRA_MSG_FMT) - 10];
 
     if (!read_timbra_log(msg_body, sizeof(msg_body)))
     {
         print_err("Couldn't read timbra log file");
-        return ERR_STATUS_CODE;
+        return false;
     }
     size_t body_len = strlen(msg_body);
     snprintf(buf, sizeof(buf), TIMBRA_MSG_FMT, hostname, cookies, body_len, msg_body);
@@ -673,7 +679,7 @@ int16_t send_mark_req(SSL *ssl, const char *hostname, const char *cookies)
     {
         ERR_print_errors_fp(stderr);
         print_err("Unable to send mark request.");
-        return ERR_STATUS_CODE;
+        return false;
     }
 
     int nbytes = SSL_read(ssl, buf, lengthof(buf));
@@ -681,7 +687,7 @@ int16_t send_mark_req(SSL *ssl, const char *hostname, const char *cookies)
     {
         ERR_print_errors_fp(stderr);
         print_err("No response for mark request. (nbytes=%d)", nbytes);
-        return ERR_STATUS_CODE;
+        return false;
     }
     buf[nbytes] = 0;
 
@@ -690,15 +696,14 @@ int16_t send_mark_req(SSL *ssl, const char *hostname, const char *cookies)
     puts(buf);
     puts("----------------------------------------------------------------------------------------------------------");
 
-    int status_code = get_response_status(buf);
-    if (status_code < 0)
+    if (!get_response_status(buf, status_code))
     {
         ERR_print_errors_fp(stderr);
         print_err("Couldn't read status code from response");
-        return ERR_STATUS_CODE;
+        return false;
     }
 
-    return status_code;
+    return true;
 
     // int nbytes;
     // while ((nbytes = SSL_read(ssl, buf, sizeof(buf) - 1)) > 0)
@@ -819,13 +824,13 @@ bool empty_timbra_log(void)
     return !ret;
 }
 
-int16_t get_response_status(char *res)
+bool get_response_status(char *res, uint16_t *status_code)
 {
     char *str_ptr = strstr(res, "HTTP/1.1");
     if (!str_ptr)
     {
         print_err("Couldn't find status code header line");
-        return ERR_STATUS_CODE;
+        return false;
     }
 
     str_ptr = strtok(str_ptr, " ");
@@ -833,12 +838,11 @@ int16_t get_response_status(char *res)
     if (!str_ptr)
     {
         print_err("Couldn't find status code header string token");
-        return ERR_STATUS_CODE;
+        return false;
     }
 
-    int16_t status_code;
-    sscanf_s(str_ptr, "%hi", &status_code);
-    return status_code;
+    sscanf_s(str_ptr, "%hu", status_code);
+    return true;
 }
 
 bool parse_scan_data(char *buf, ScanData *out)
