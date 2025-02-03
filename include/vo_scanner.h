@@ -2,7 +2,6 @@
 #define VO_SCANNER_H_
 
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 #include <stdbool.h>
 #include <time.h>
@@ -38,7 +37,7 @@
 #define print_err(fmt, ...)                                                    \
     do                                                                         \
     {                                                                          \
-        fprintf(stderr, "%s:%d:%s(): %s " fmt "\n",                            \
+        fprintf(stderr, "%s:%d:%s(): %s: " fmt "\n",                            \
                 __FILE__, __LINE__, __func__, strerror(errno), ##__VA_ARGS__); \
     } while (0)
 /*
@@ -52,7 +51,7 @@
 #define throw_err(fmt, ...)                                                    \
     do                                                                         \
     {                                                                          \
-        fprintf(stderr, "%s:%d:%s(): %s " fmt "\n",                            \
+        fprintf(stderr, "%s:%d:%s(): %s: " fmt "\n",                            \
                 __FILE__, __LINE__, __func__, strerror(errno), ##__VA_ARGS__); \
         exit(GetLastError());                                                  \
     } while (0)
@@ -79,7 +78,7 @@
 #endif /* NMIN_COM */
 #define NMAX_COM 255
 #define INVALID_COM_NUM 0
-#define COM_PORT_FORMAT "\\\\.\\COM%hhu"
+#define COMM_PORT_FORMAT "\\\\.\\COM%hhu"
 
 #define LOGIN_MSG_FMT "POST /api/v1/users/login HTTP/1.1\r\n"             \
                       "Host: %s\r\n"                                      \
@@ -156,6 +155,13 @@ typedef struct ScanData
     bool mark_in;
 } ScanData;
 
+typedef struct CommData {
+    HANDLE handler;
+    DWORD event_mask;
+    uint8_t nport;
+    bool ready;
+} CommData;
+
 void *send_timbra_reqs(void *args);
 void *logger_routine(void *args);
 void popup_manager();
@@ -169,10 +175,10 @@ bool read_timbra_log(char *buf, size_t size);
 void write_to_timbra_log(const char *code, const uint32_t postazione_id);
 bool get_response_status(char *res, uint16_t *status_code);
 bool empty_timbra_log(void);
-uint8_t find_serial_port(HANDLE *hcom);
-uint8_t open_serial_port(HANDLE *hcom, DWORD *event_mask);
-void close_com(HANDLE *hcom);
-bool read_scanner(HANDLE hcom, DWORD event_mask, char *buf, size_t size);
+bool find_serial_port(CommData *comm);
+bool open_serial_port(CommData *comm);
+void close_comm(CommData *comm);
+bool read_scanner(CommData *comm, char *buf, size_t size);
 bool is_badge_code_valid(const char *code_str);
 bool parse_scan_data(char *buf, ScanData *out);
 void timestamp(char *buf);

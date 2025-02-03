@@ -14,6 +14,10 @@ int main(int argc, char **argv)
 
     ProgramArgs args;
     parse_args(argc, argv, &args);
+    printf("Arguments: hostname=%s port=%s uname=%s psw=%s post_id=%u\n",
+           args.reqs.hostname, args.reqs.port,
+           args.reqs.username, args.reqs.password,
+           args.log.postazione_id);
 
     CreateDirectory("data", NULL);
 
@@ -51,33 +55,31 @@ void *logger_routine(void *args)
 {
     const uint32_t postazione_id = ((LogArgs *)args)->postazione_id;
 
-    HANDLE hcom = INVALID_HANDLE_VALUE;
-    DWORD event_mask;
-    uint8_t ncom = INVALID_COM_NUM;
+    CommData comm = {0};
 
     while (true)
     {
-        if (hcom == INVALID_HANDLE_VALUE)
+        if (!comm.ready)
         {
-            if (!(ncom = open_serial_port(&hcom, &event_mask)))
+            if (!open_serial_port(&comm))
             {
                 print_err("Couldn't open serial device");
                 Sleep(1000);
                 continue;
             }
 
-            printf("[LOG] Device connected to COM%hhu\n", ncom);
+            printf("[LOG] Device connected to COM%hhu\n", comm.nport);
         }
 
         char scan_buf[256];
-        if (!read_scanner(hcom, event_mask, scan_buf, sizeof(scan_buf)))
+        if (!read_scanner(&comm, scan_buf, sizeof(scan_buf)))
         {
-            print_err("Error reading from device (COM%hhu)", ncom);
-            close_com(hcom);
+            print_err("Error reading from device (COM%hhu)", comm.nport);
+            close_comm(&comm);
             continue;
         }
 
-        printf("[LOG] Scan data read from device (COM%hhu): %s\n", ncom, scan_buf);
+        printf("[LOG] Scan data read from device (COM%hhu): %s\n", comm.nport, scan_buf);
 
         ScanData scan_data = {0};
         if (!parse_scan_data(scan_buf, &scan_data))
@@ -86,7 +88,7 @@ void *logger_routine(void *args)
 
             if (strlen(scan_buf))
             {
-                strncpy(popup_info.inner_text, POPUP_MSG_FAIL, lengthof(POPUP_MSG_FAIL));
+                strncpy(popup_info.inner_text, POPUP_MSG_FAIL, sizeof(POPUP_MSG_FAIL));
                 popup_info.bg_color = RGB(255, 0, 0);
                 SendMessage(popup_info.hwnd, WM_USER, 0, 0);
             }
@@ -108,7 +110,7 @@ void *logger_routine(void *args)
         }
     }
 
-    close_com(hcom);
+    close_comm(&comm);
 
     return NULL;
 }
@@ -323,16 +325,16 @@ LRESULT CALLBACK window_proc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
     return DefWindowProc(hwnd, uMsg, wParam, lParam);
 }
 
-uint8_t find_serial_port(HANDLE *hcom)
+bool find_serial_port(CommData *comm)
 {
-    char com_name[16];
+    char comm_name[16];
 
     for (uint8_t i = NMIN_COM; i; ++i)
     {
-        snprintf(com_name, sizeof(com_name), COM_PORT_FORMAT, i);
+        snprintf(comm_name, sizeof(comm_name), COMM_PORT_FORMAT, i);
 
-        *hcom = CreateFile(
-            com_name,
+        comm->handler = CreateFile(
+            comm_name,
             GENERIC_READ | GENERIC_WRITE,
             0,
             NULL,
@@ -341,40 +343,41 @@ uint8_t find_serial_port(HANDLE *hcom)
             0,
             NULL);
 
-        if (*hcom != INVALID_HANDLE_VALUE)
-            return i;
-
-        close_com(hcom);
+        if (comm->handler != INVALID_HANDLE_VALUE)
+        {
+            comm->nport = i;
+            return true;
+        }
     }
 
-    return INVALID_COM_NUM;
+    close_comm(comm);
+    return false;
 }
 
-uint8_t open_serial_port(HANDLE *hcom, DWORD *event_mask)
+bool open_serial_port(CommData *comm)
 {
-    uint8_t ncom = find_serial_port(hcom);
-    if (!ncom)
+    if (!find_serial_port(comm))
     {
-        close_com(hcom);
+        close_comm(comm);
         print_err("Couldn't find any available serial port");
-        return INVALID_COM_NUM;
+        return false;
     }
 
-    if (!FlushFileBuffers(*hcom))
+    if (!FlushFileBuffers(comm->handler))
     {
-        close_com(hcom);
+        close_comm(comm);
         print_err("FlushFileBuffers");
-        return INVALID_COM_NUM;
+        return false;
     }
 
     DCB dcb = {0};
     dcb.DCBlength = sizeof(dcb);
 
-    if (!GetCommState(*hcom, &dcb))
+    if (!GetCommState(comm->handler, &dcb))
     {
-        close_com(hcom);
+        close_comm(comm);
         print_err("Couldn't get serial device attributes");
-        return INVALID_COM_NUM;
+        return false;
     }
 
     dcb.BaudRate = CBR_9600;
@@ -382,20 +385,20 @@ uint8_t open_serial_port(HANDLE *hcom, DWORD *event_mask)
     dcb.StopBits = ONESTOPBIT;
     dcb.Parity = NOPARITY;
 
-    if (!SetCommState(*hcom, &dcb))
+    if (!SetCommState(comm->handler, &dcb))
     {
-        close_com(hcom);
+        close_comm(comm);
         print_err("Couldn't set serial device attributes");
-        return INVALID_COM_NUM;
+        return false;
     }
 
     COMMTIMEOUTS timeouts = {0};
 
-    if (!GetCommTimeouts(*hcom, &timeouts))
+    if (!GetCommTimeouts(comm->handler, &timeouts))
     {
-        close_com(hcom);
+        close_comm(comm);
         print_err("Couldn't get serial device timeout attributes");
-        return INVALID_COM_NUM;
+        return false;
     }
 
     timeouts.ReadIntervalTimeout = MAXDWORD;
@@ -404,38 +407,38 @@ uint8_t open_serial_port(HANDLE *hcom, DWORD *event_mask)
     timeouts.WriteTotalTimeoutConstant = 0;
     timeouts.WriteTotalTimeoutMultiplier = 0;
 
-    if (!SetCommTimeouts(*hcom, &timeouts))
+    if (!SetCommTimeouts(comm->handler, &timeouts))
     {
-        close_com(hcom);
+        close_comm(comm);
         print_err("Couldn't set serial device timeout attributes");
-        return INVALID_COM_NUM;
+        return false;
     }
 
-    *event_mask = (DWORD)EV_RXCHAR;
-    if (!SetCommMask(*hcom, *event_mask))
+    comm->event_mask = (DWORD)EV_RXCHAR;
+    if (!SetCommMask(comm->handler, comm->event_mask))
     {
-        close_com(hcom);
+        close_comm(comm);
         print_err("Couldn't set serial device event mask");
-        return INVALID_COM_NUM;
+        return false;
     }
 
-    return ncom;
+    comm->ready = true;
+    return true;
 }
 
-void close_com(HANDLE *hcom)
+void close_comm(CommData *comm)
 {
-    if (*hcom && *hcom != INVALID_HANDLE_VALUE)
-        CloseHandle(*hcom);
-    *hcom = INVALID_HANDLE_VALUE;
+    if (comm->handler && comm->handler != INVALID_HANDLE_VALUE)
+        CloseHandle(comm->handler);
+    comm->ready = false;
 }
 
-bool read_scanner(HANDLE hcom, DWORD event_mask, char *buf, size_t size)
+bool read_scanner(CommData *comm, char *buf, size_t size)
 {
-
-    if (!WaitCommEvent(hcom, &event_mask, NULL))
+    if (!WaitCommEvent(comm->handler, &comm->event_mask, NULL))
     {
-        print_err("WaitCommEvent");
-        close_com(&hcom);
+        print_err("WaitCommEvent %lu", GetLastError());
+        close_comm(comm);
         return false;
     }
 
@@ -446,10 +449,10 @@ bool read_scanner(HANDLE hcom, DWORD event_mask, char *buf, size_t size)
     {
         tmp_ch = 0;
 
-        if (!ReadFile(hcom, &tmp_ch, 1, &bytes_read, NULL))
+        if (!ReadFile(comm->handler, &tmp_ch, 1, &bytes_read, NULL))
         {
             print_err("Error reading from serial device");
-            close_com(&hcom);
+            close_comm(comm);
             return false;
         }
 
@@ -522,6 +525,13 @@ SSL *init_https_conn(const char *hostname, const char *port)
         return NULL;
     }
 
+    WSADATA wsa;
+    if (WSAStartup(MAKEWORD(2, 2), &wsa) != NO_ERROR)
+    {
+        print_err("WSAStartup. Failed. Error Code : %d.", WSAGetLastError());
+        return NULL;
+    }
+
     struct addrinfo hints, *res;
     memset(&hints, 0, sizeof(hints));
     hints.ai_family = AF_INET;
@@ -534,15 +544,8 @@ SSL *init_https_conn(const char *hostname, const char *port)
         return NULL;
     }
 
-    WSADATA wsa;
-    if (WSAStartup(MAKEWORD(2, 2), &wsa) != NO_ERROR)
-    {
-        print_err("WSAStartup. Failed. Error Code : %d.", WSAGetLastError());
-        return NULL;
-    }
-
     SOCKET sock = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
-    if (sock != INVALID_SOCKET)
+    if (sock == INVALID_SOCKET)
     {
         print_err("Couldn't create socket : %d.", WSAGetLastError());
         WSACleanup();
