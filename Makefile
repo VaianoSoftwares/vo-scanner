@@ -21,27 +21,28 @@ ifeq ($(OS),Windows_NT)
 	MACHINE = $(OS) $(PROCESSOR_ARCHITECTURE)
 
 	CC = gcc
+	CFLAGS += -O2 -NO_CONSOLE
 	CFLAGS += -IC:/msys64/ucrt64/include 
 	# CFLAGS += -DNMIN_COM=3
 else
 	UNAME_S := $(shell uname -s)
 	ifeq ($(UNAME_S),Linux)
-		MACHINE = LINUX
+		MACHINE = Linux
 	else
 		$(error Unsupported platform $(UNAME_S))
 	endif
-	UNAME_P := $(shell uname -p)
-	ifeq ($(UNAME_P),x86_64)
+	UNAME_M := $(shell uname -m)
+	ifeq ($(UNAME_M),x86_64)
 		MACHINE += AMD64
 	endif
-	ifneq ($(filter %86,$(UNAME_P)),)
+	ifneq ($(filter %86,$(UNAME_M)),)
 		MACHINE += IA32
 	endif
-	ifneq ($(filter arm%,$(UNAME_P)),)
+	ifneq ($(filter arm%,$(UNAME_M)),)
 		MACHINE += ARM
 	endif
 
-	MACHINE += (Wine)
+	MACHINE += "(Wine)"
 
 	CC = x86_64-w64-mingw32-gcc
 	CFLAGS += -I/usr/x86_64-w64-mingw32/include

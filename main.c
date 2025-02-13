@@ -2,24 +2,33 @@
 
 #include "vo_scanner.h"
 
+static const char *arg_names[] = {"psw", "postid", "hostname", "port", "uname", "password", "username", "host"};
+
 static pthread_mutex_t log_mutex = PTHREAD_MUTEX_INITIALIZER;
+// static pthread_mutex_t _log_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t send_req_cond = PTHREAD_COND_INITIALIZER;
 
 bool send_req = false;
 PopupInfo popup_info = {0};
 
+#define TLS_TIME_BUF_SIZE 26
+_Thread_local char timestamp[TLS_TIME_BUF_SIZE] = {0};
+
 int main(int argc, char **argv)
 {
-    puts("Program execution started.");
+#ifdef NO_CONSOLE
+    hide_console();
+#endif // NO_CONSOLE
+    print_log("Program execution started.\n");
 
-    ProgramArgs args;
-    parse_args(argc, argv, &args);
-    printf("Arguments: hostname=%s port=%s uname=%s psw=%s post_id=%u\n",
-           args.reqs.hostname, args.reqs.port,
-           args.reqs.username, args.reqs.password,
-           args.log.postazione_id);
+    ProgramArgs args = parse_args(argc, argv);
+    print_log("Arguments: hostname=%s port=%s uname=%s psw=%s post_id=%u\n",
+              args.reqs.hostname, args.reqs.port,
+              args.reqs.username, args.reqs.password,
+              args.log.postazione_id);
 
     CreateDirectory("data", NULL);
+    CreateDirectory("logs", NULL);
 
     pthread_t reqs_pid;
     if (pthread_create(&reqs_pid, NULL, send_timbra_reqs, (void *)&args.reqs))
@@ -29,26 +38,116 @@ int main(int argc, char **argv)
         throw_err("Couldn't create logger routine thread");
     popup_manager();
 
-    puts("Main thread waiting for child processes.");
+    print_log("Main thread waiting for child processes.\n");
     pthread_join(reqs_pid, NULL);
     pthread_join(logger_pid, NULL);
 
-    puts("Program execution terminated.");
+    print_log("Program execution terminated.\n");
 
     return EXIT_SUCCESS;
 }
 
-void parse_args(int argc, char **argv, ProgramArgs *args)
+// void write_msg_to_log(const char *fmt, ...)
+// {
+//     pthread_mutex_lock(&_log_mutex);
+//     FILE *log_file = fopen(LOG_FILENAME, "a");
+
+//     va_list argptr;
+//     va_start(argptr, fmt);
+//     vfprintf(log_file, fmt, argptr);
+//     va_end(argptr);
+
+//     fflush(log_file);
+//     fclose(log_file);
+//     pthread_mutex_unlock(&_log_mutex);
+// }
+
+void msgbox_err(const char *fmt, ...)
+{
+    va_list argptr;
+    va_start(argptr, fmt);
+    int msg_len = vsnprintf(NULL, 0, fmt, argptr) + 1;
+    va_end(argptr);
+
+    va_start(argptr, fmt);
+    char *msg = malloc(msg_len);
+    vsnprintf(msg, msg_len, fmt, argptr);
+    va_end(argptr);
+
+    static const char err_fmt[] = "%s\n\n%s";
+    const char *strerr = strerror(errno);
+    msg_len += countof(err_fmt) + strlen(strerr);
+    char *full_msg = malloc(msg_len);
+    snprintf(full_msg, msg_len, err_fmt, msg, strerr);
+
+    MessageBox(NULL, full_msg, "Error", MB_OK);
+
+    free(msg);
+    free(full_msg);
+}
+
+void hide_console(void)
+{
+    HWND hwnd = GetConsoleWindow();
+    if (!hwnd)
+        throw_err("Couldn't get console window handler");
+    ShowWindow(hwnd, SW_HIDE);
+}
+
+ProgramArgs parse_args(int argc, char **argv)
 {
     if (argc < 3)
-        throw_err("usage: %s <password> <postazioneId> <hostname> <port> <username>", argv[0]);
+        throw_err(
+            "usage: %s psw=<password> postid=<postazioneId> "
+            "[hostname=<hostname>] [port=<port>] [uname=<username>]",
+            argv[0]);
 
-    args->reqs.port = argc > 4 ? argv[4] : DEFAULT_HTTPS_SERVER_PORT;
-    args->reqs.hostname = argc > 3 ? argv[3] : DEFAULT_HOSTNAME;
-    args->reqs.username = argc > 5 ? argv[5] : NULL;
-    args->reqs.password = argv[1];
+    ProgramArgs args = {0};
 
-    args->log.postazione_id = (uint32_t)atoi(argv[2]);
+    args.reqs.port = DEFAULT_SERVER_PORT;
+    args.reqs.hostname = DEFAULT_HOSTNAME;
+
+    args.log.postazione_id = (uint32_t)atoi(argv[2]);
+
+    for (uint8_t i = 1; i < argc; ++i)
+    {
+        char name[16], value[64];
+        if (sscanf(argv[i], "-%15[^=]=%63s", name, value) != 2)
+        {
+            continue;
+        }
+
+        for (uint8_t j = 0; j < countof(arg_names); ++j)
+        {
+            if (!strcmp(name, arg_names[j]))
+            {
+                char *vptr = (char *)(argv[i] + strlen(name) + 2);
+                switch (j)
+                {
+                case PAA_PSW:
+                case PAA_PSW1:
+                    args.reqs.password = vptr;
+                    break;
+                case PAA_POSTID:
+                    args.log.postazione_id = (uint32_t)atoi(vptr);
+                    break;
+                case PAA_HOST:
+                case PAA_HOST1:
+                    args.reqs.hostname = vptr;
+                    break;
+                case PAA_PORT:
+                    args.reqs.port = vptr;
+                    break;
+                case PAA_UNAME:
+                case PAA_UNAME1:
+                    args.reqs.port = vptr;
+                    break;
+                }
+                break;
+            }
+        }
+    }
+    return args;
 }
 
 void *logger_routine(void *args)
@@ -68,7 +167,7 @@ void *logger_routine(void *args)
                 continue;
             }
 
-            printf("[LOG] Device connected to COM%hhu\n", comm.nport);
+            print_log("[LOG] Device connected to COM%hhu\n", comm.nport);
         }
 
         char scan_buf[256];
@@ -79,7 +178,7 @@ void *logger_routine(void *args)
             continue;
         }
 
-        printf("[LOG] Scan data read from device (COM%hhu): %s\n", comm.nport, scan_buf);
+        print_log("[LOG] Scan data read from device (COM%hhu): %s\n", comm.nport, scan_buf);
 
         ScanData scan_data = {0};
         if (!parse_scan_data(scan_buf, &scan_data))
@@ -123,7 +222,7 @@ void *send_timbra_reqs(void *args)
     if (!tmp_uname)
     {
         bool got_uname;
-#ifndef _DEBUG_UNAME
+#ifndef UNAME_FROM_HOSTNAME
         got_uname = GetUserName(uname, &UNAME_MAX_LEN);
 #else
         got_uname = GetComputerName(uname, &UNAME_MAX_LEN);
@@ -131,6 +230,8 @@ void *send_timbra_reqs(void *args)
         if (!got_uname)
             throw_err("Couldn't get username");
         tmp_uname = uname;
+
+        print_log("Username: %s\n", tmp_uname);
     }
 
     const char *port = ((ReqsArgs *)args)->port;
@@ -140,7 +241,7 @@ void *send_timbra_reqs(void *args)
 
     char cookies[1024];
     bool has_cookies = get_cookies(cookies, sizeof(cookies));
-    puts(has_cookies ? "[REQ] Cookies acquired" : "[REQ] No cookies available");
+    print_log(has_cookies ? "[REQ] Cookies acquired\n" : "[REQ] No cookies available\n");
 
     while (true)
     {
@@ -153,11 +254,11 @@ void *send_timbra_reqs(void *args)
             continue;
         }
 
-        printf("[REQ] Connection with remote server %s:%s enstablished\n", hostname, port);
+        print_log("[REQ] Connection with remote server %s:%s enstablished\n", hostname, port);
 
-        puts("----------------------------------------------------------------------------------------------------------");
+        print_log("----------------------------------------------------------------------------------------------------------\n");
         show_certs(ssl);
-        puts("----------------------------------------------------------------------------------------------------------");
+        print_log("----------------------------------------------------------------------------------------------------------\n");
 
         if (!has_cookies)
         {
@@ -172,7 +273,7 @@ void *send_timbra_reqs(void *args)
             }
             else
             {
-                puts("[REQ] Cookies acquired by login request");
+                print_log("[REQ] Cookies acquired by login request\n");
                 has_cookies = true;
                 SSL_shutdown(ssl);
                 SSL_free(ssl);
@@ -199,18 +300,18 @@ void *send_timbra_reqs(void *args)
             print_err("Timbra requests have been rejected. Status code: %hu", status_code);
             break;
         case SUCCESS_STATUS_CODE:
-            printf("[REQ] Timbra requests have been (fully/partialy) accepted.\n");
+            print_log("[REQ] Timbra requests have been (fully/partialy) accepted.\n");
             if (!empty_timbra_log())
                 print_err("Coulnd't empty timbra log file");
             else
-                puts("[REQ] Timbra log file has been blanked");
+                print_log("[REQ] Timbra log file has been blanked\n");
             break;
         case CLIENT_ERROR_STATUS_CODE:
-            printf("[REQ] Timbra requests have been rejected (deleting log file). Status code: %hu\n", status_code);
+            print_log("[REQ] Timbra requests have been rejected (deleting log file). Status code: %hu\n", status_code);
             if (!empty_timbra_log())
                 print_err("Coulnd't empty timbra log file");
             else
-                puts("[REQ] Timbra log file has been blanked");
+                print_log("[REQ] Timbra log file has been blanked\n");
             break;
         default:
             print_err("Timbra requests have been rejected. Status code: %hu", status_code);
@@ -226,7 +327,7 @@ void *send_timbra_reqs(void *args)
     return NULL;
 }
 
-void popup_manager()
+void popup_manager(void)
 {
     static const char CLASS_NAME[] = "popup";
 
@@ -240,7 +341,7 @@ void popup_manager()
 
     RegisterClass(&wc);
 
-    strcpy(popup_info.inner_text, "");
+    strncpy(popup_info.inner_text, "", sizeof(popup_info.inner_text));
     popup_info.bg_color = RGB(0, 0, 0);
     popup_info.font = CreateFont(40, 0, 0, 0, FW_BOLD, false, false, false, DEFAULT_CHARSET, OUT_OUTLINE_PRECIS,
                                  CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, VARIABLE_PITCH, NULL);
@@ -468,13 +569,11 @@ bool read_scanner(CommData *comm, char *buf, size_t size)
 void write_to_timbra_log(const char *code, const uint32_t postazione_id)
 {
     pthread_mutex_lock(&log_mutex);
-    FILE *timbra_log = fopen(TIMBRA_LOG_FILENAME, "a+");
-    if (!timbra_log)
+    FILE *timbra_log;
+    if (fopen_s(&timbra_log, TIMBRA_LOG_FILENAME, "a+"))
         throw_err("Couldn't open " TIMBRA_LOG_FILENAME " file");
 
-    char str_date[32];
-    timestamp(str_date);
-    fprintf(timbra_log, TIMBRA_LOG_ROW_FMT, code, postazione_id, str_date);
+    fprintf(timbra_log, TIMBRA_LOG_ROW_FMT, code, postazione_id, TIMESTAMP);
     fclose(timbra_log);
 
     send_req = true;
@@ -482,12 +581,21 @@ void write_to_timbra_log(const char *code, const uint32_t postazione_id)
     pthread_mutex_unlock(&log_mutex);
 }
 
-void timestamp(char *buf)
+char *get_current_timestamp(char *buf, size_t size)
 {
-    const struct tm tm = *localtime(&(time_t){time(NULL)});
-    if (asctime_s(buf, 26, &tm))
+    if (!buf || size < 26)
+        throw_err("Timestamp buffer too small");
+
+    time_t curr_time = time(NULL);
+    struct tm tm;
+    if (localtime_s(&tm, &curr_time))
+        throw_err("localtime_s");
+
+    if (asctime_s(buf, size, &tm))
         throw_err("asctime_s");
     buf[24] = 0;
+
+    return buf;
 }
 
 void show_certs(SSL *ssl)
@@ -497,16 +605,16 @@ void show_certs(SSL *ssl)
     X509 *cert = SSL_get_peer_certificate(ssl);
     if (cert == NULL)
     {
-        puts("Info: No client certificates configured.");
+        print_log("Info: No client certificates configured.\n");
         return;
     }
 
-    puts("Server certificates:");
+    print_log("Server certificates:");
     line = X509_NAME_oneline(X509_get_subject_name(cert), 0, 0);
-    printf("Subject: %s\n", line);
+    print_log("Subject: %s\n", line);
     free(line);
     line = X509_NAME_oneline(X509_get_issuer_name(cert), 0, 0);
-    printf("Issuer: %s\n", line);
+    print_log("Issuer: %s\n", line);
     free(line);
     X509_free(cert);
 }
@@ -600,10 +708,10 @@ bool send_login_req(SSL *ssl, const char *username, const char *password, const 
     snprintf(msg_body, sizeof(msg_body), LOGIN_BODY_FMT, username, password);
     snprintf(buf, sizeof(buf), LOGIN_MSG_FMT, hostname, strlen(msg_body), msg_body);
 
-    puts("----------------------------------------------------------------------------------------------------------");
-    puts("Login Request");
-    puts(buf);
-    puts("----------------------------------------------------------------------------------------------------------");
+    print_log("----------------------------------------------------------------------------------------------------------\n");
+    print_log("Login Request\n");
+    print_log(buf);
+    print_log("\n----------------------------------------------------------------------------------------------------------\n");
 
     if (SSL_write(ssl, buf, strlen(buf)) <= 0)
     {
@@ -621,10 +729,10 @@ bool send_login_req(SSL *ssl, const char *username, const char *password, const 
     }
     buf[nbytes] = 0;
 
-    puts("----------------------------------------------------------------------------------------------------------");
-    printf("Received Login Response (nbytes=%d)\n", nbytes);
-    puts(buf);
-    puts("----------------------------------------------------------------------------------------------------------");
+    print_log("----------------------------------------------------------------------------------------------------------\n");
+    print_log("Received Login Response (nbytes=%d)\n", nbytes);
+    print_log(buf);
+    print_log("\n----------------------------------------------------------------------------------------------------------\n");
 
     if (!save_cookies(buf, cookies, cookies_size))
     {
@@ -640,10 +748,10 @@ bool send_login_req(SSL *ssl, const char *username, const char *password, const 
     // {
     //     buf[nbytes] = 0;
 
-    //     puts("----------------------------------------------------------------------------------------------------------");
-    //     puts("Login Response");
-    //     puts(buf);
-    //     puts("----------------------------------------------------------------------------------------------------------");
+    //     print_log("----------------------------------------------------------------------------------------------------------");
+    //     print_log("Login Response");
+    //     print_log(buf);
+    //     print_log("----------------------------------------------------------------------------------------------------------");
 
     //     if (save_cookies(buf, sizeof(buf), cookies, cookies_size))
     //     {
@@ -673,10 +781,10 @@ bool send_mark_req(SSL *ssl, const char *hostname, const char *cookies, uint16_t
     size_t body_len = strlen(msg_body);
     snprintf(buf, sizeof(buf), TIMBRA_MSG_FMT, hostname, cookies, body_len, msg_body);
 
-    puts("----------------------------------------------------------------------------------------------------------");
-    puts("Timbra Request");
-    puts(buf);
-    puts("----------------------------------------------------------------------------------------------------------");
+    print_log("----------------------------------------------------------------------------------------------------------\n");
+    print_log("Timbra Request\n");
+    print_log(buf);
+    print_log("\n----------------------------------------------------------------------------------------------------------\n");
 
     if (SSL_write(ssl, buf, strlen(buf)) <= 0)
     {
@@ -694,10 +802,10 @@ bool send_mark_req(SSL *ssl, const char *hostname, const char *cookies, uint16_t
     }
     buf[nbytes] = 0;
 
-    puts("----------------------------------------------------------------------------------------------------------");
-    printf("Received Mark Response (nbytes=%d)\n", nbytes);
-    puts(buf);
-    puts("----------------------------------------------------------------------------------------------------------");
+    print_log("----------------------------------------------------------------------------------------------------------\n");
+    print_log("Received Mark Response (nbytes=%d)\n", nbytes);
+    print_log(buf);
+    print_log("\n----------------------------------------------------------------------------------------------------------\n");
 
     if (!get_response_status(buf, status_code))
     {
@@ -713,10 +821,10 @@ bool send_mark_req(SSL *ssl, const char *hostname, const char *cookies, uint16_t
     // {
     //     buf[nbytes] = 0;
 
-    //     puts("----------------------------------------------------------------------------------------------------------");
-    //     puts("Timbra Response");
-    //     puts(buf);
-    //     puts("----------------------------------------------------------------------------------------------------------");
+    //     print_log("----------------------------------------------------------------------------------------------------------");
+    //     print_log("Timbra Response");
+    //     print_log(buf);
+    //     print_log("----------------------------------------------------------------------------------------------------------");
 
     //     int status_code = get_response_status(buf);
     //     if (status_code >= 0)
@@ -756,7 +864,7 @@ bool get_cookies(char *buf, size_t size)
     return true;
 }
 
-bool save_cookies(char *src, char *dest, size_t dest_size)
+bool save_cookies(char *src, char *dest, size_t size)
 {
     char *str_ptr = strstr(src, "Set-Cookie: ");
     if (!str_ptr)
@@ -773,7 +881,7 @@ bool save_cookies(char *src, char *dest, size_t dest_size)
         return false;
     }
 
-    if (strcpy_s(dest, dest_size, str_ptr))
+    if (strncpy(dest, str_ptr, size))
         throw_err("Couldn't copy cookies to buffer");
 
     FILE *cookie_jar;

@@ -33,49 +33,97 @@
        __typeof__ (b) _b = (b); \
      _a < _b ? _a : _b; })
 
-#ifndef NDEBUG
-#define print_err(fmt, ...)                                                    \
+#define TIMESTAMP (get_current_timestamp(timestamp, sizeof(timestamp)))
+
+#ifndef NO_CONSOLE
+#define __fprintf_err(file, fmt, ...)                                          \
     do                                                                         \
     {                                                                          \
-        fprintf(stderr, "%s:%d:%s(): %s: " fmt "\n",                            \
+        fprintf(file, "%s:%d:%s(): %s: " fmt "\n",                             \
                 __FILE__, __LINE__, __func__, strerror(errno), ##__VA_ARGS__); \
+        fflush(file);                                                          \
     } while (0)
-/*
-#define print_err(msg)                                          \
+#define __printf_err(fmt, ...)                     \
+    do                                             \
+    {                                              \
+        __fprintf_err(stderr, fmt, ##__VA_ARGS__); \
+    } while (0)
+#define __fprint_err(file, cstr)                                \
     do                                                          \
     {                                                           \
-        fprintf(stderr, "%s %s:%d:%s(): %s\n",                  \
+        fprintf(file, "%s:%d:%s(): %s: " cstr "\n",             \
                 __FILE__, __LINE__, __func__, strerror(errno)); \
+        fflush(file);                                           \
     } while (0)
-*/
-#define throw_err(fmt, ...)                                                    \
-    do                                                                         \
-    {                                                                          \
-        fprintf(stderr, "%s:%d:%s(): %s: " fmt "\n",                            \
-                __FILE__, __LINE__, __func__, strerror(errno), ##__VA_ARGS__); \
-        exit(GetLastError());                                                  \
+#define __print_err(cstr)           \
+    do                              \
+    {                               \
+        __fprint_err(stderr, cstr); \
     } while (0)
-/*
-#define throw_err(msg)                                          \
-    do                                                          \
-    {                                                           \
-        fprintf(stderr, "%s %s:%d:%s(): %s\n",                  \
-                __FILE__, __LINE__, __func__, strerror(errno)); \
-        exit(GetLastError());                                   \
+
+#define __fthrowf_err(file, fmt, ...)            \
+    do                                           \
+    {                                            \
+        __fprintf_err(file, fmt, ##__VA_ARGS__); \
+        exit(EXIT_FAILURE);                      \
     } while (0)
-*/
+#define __throwf_err(fmt, ...)            \
+    do                                    \
+    {                                     \
+        __printf_err(fmt, ##__VA_ARGS__); \
+        exit(EXIT_FAILURE);               \
+    } while (0)
+#define __fthrow_err(file, cstr)   \
+    do                             \
+    {                              \
+        __fprintf_err(file, cstr); \
+        exit(EXIT_FAILURE);        \
+    } while (0)
+#define __throw_err(cstr)   \
+    do                      \
+    {                       \
+        __print_err(cstr);  \
+        exit(EXIT_FAILURE); \
+    } while (0)
+
+#define print_log(fmt, ...)         \
+    do                              \
+    {                               \
+        printf(fmt, ##__VA_ARGS__); \
+    } while (0)
+#define print_err(fmt, ...) __printf_err(fmt, ##__VA_ARGS__)
+#define throw_err(fmt, ...)               \
+    do                                    \
+    {                                     \
+        __printf_err(fmt, ##__VA_ARGS__); \
+        msgbox_err(fmt, ##__VA_ARGS__);   \
+        exit(EXIT_FAILURE);               \
+    } while (0)
 #else
+#define __fprintf_err(file, fmt, ...)
+#define __fthrowf_err(file, fmt, ...)
+#define __printf_err(fmt, ...)
+#define __throwf_err(fmt, ...)
+#define __fprint_err(file, cstr)
+#define __fthrow_err(file, cstr)
+#define __print_err(cstr)
+#define __throw_err(cstr)
+#define print_log
 #define print_err(fmt, ...)
-#define throw_err(fmt, ...)
-#endif
+#define throw_err(fmt, ...)           \
+    do                                \
+    {                                 \
+        msgbox_err(fmt, ##__VA_ARGS); \
+        exit(EXIT_FAILURE);           \
+    } while (0)
+#endif // NO_CONSOLE
 
 #define DEFAULT_HOSTNAME "127.0.0.1"
-#define DEFAULT_HTTP_SERVER_PORT "80"
-#define DEFAULT_HTTPS_SERVER_PORT "443"
+#define DEFAULT_SERVER_PORT "443"
 
 #ifndef NMIN_COM
 #define NMIN_COM 1
-#endif /* NMIN_COM */
+#endif // NMIN_COM
 #define NMAX_COM 255
 #define INVALID_COM_NUM 0
 #define COMM_PORT_FORMAT "\\\\.\\COM%hhu"
@@ -119,6 +167,9 @@
 #define WIN_WIDTH 650
 #define WIN_HEIGHT 250
 
+#define LOG_FILENAME "logs\\"__DATE__ \
+                     ".log"
+
 typedef struct ReqsArgs
 {
     char *port;
@@ -131,6 +182,20 @@ typedef struct LogArgs
 {
     uint32_t postazione_id;
 } LogArgs;
+
+typedef enum ProgramArgsAttrs
+{
+    PAA_PSW,
+    PAA_POSTID,
+    PAA_HOST,
+    PAA_PORT,
+    PAA_UNAME,
+    PAA_PSW1,
+    PAA_UNAME1,
+    PAA_HOST1
+} ProgramArgsAttrs;
+
+#define PAN_PSW
 
 typedef struct ProgramArgs
 {
@@ -155,7 +220,8 @@ typedef struct ScanData
     bool mark_in;
 } ScanData;
 
-typedef struct CommData {
+typedef struct CommData
+{
     HANDLE handler;
     DWORD event_mask;
     uint8_t nport;
@@ -164,7 +230,7 @@ typedef struct CommData {
 
 void *send_timbra_reqs(void *args);
 void *logger_routine(void *args);
-void popup_manager();
+void popup_manager(void);
 SSL *init_https_conn(const char *hostname, const char *port);
 void show_certs(SSL *ssl);
 bool send_login_req(SSL *ssl, const char *username, const char *password, const char *hostname, char *cookies, size_t cookies_size);
@@ -181,9 +247,11 @@ void close_comm(CommData *comm);
 bool read_scanner(CommData *comm, char *buf, size_t size);
 bool is_badge_code_valid(const char *code_str);
 bool parse_scan_data(char *buf, ScanData *out);
-void timestamp(char *buf);
+char *get_current_timestamp(char *buf, size_t size);
 LRESULT CALLBACK window_proc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
-void parse_args(int argc, char **argv, ProgramArgs *args);
+ProgramArgs parse_args(int argc, char **argv);
+void hide_console(void);
+void msgbox_err(const char *fmt, ...);
 int main(int argc, char **argv);
 
 #endif // VO_SCANNER_H_
