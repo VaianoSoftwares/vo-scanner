@@ -886,7 +886,7 @@ bool save_cookies(char *src, char *dest, size_t size)
         return false;
     }
 
-    if (strncpy(dest, str_ptr, size))
+    if (!strncpy(dest, str_ptr, size))
         throw_err("Couldn't copy cookies to buffer");
 
     FILE *cookie_jar;

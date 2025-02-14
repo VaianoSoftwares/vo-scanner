@@ -167,7 +167,7 @@
 #define BEEP_OUT "res\\out.wav"
 #define POPUP_MSG_SUCC_FMT "Badge Timbrato con Successo\n\n%s %s %s Struttura"
 #define POPUP_MSG_FAIL "Impossibile Timbrare Badge\n\nCodice Non Valido"
-#define WIN_WIDTH 650
+#define WIN_WIDTH 800
 #define WIN_HEIGHT 250
 
 #define LOG_FILENAME "logs\\"__DATE__ \
