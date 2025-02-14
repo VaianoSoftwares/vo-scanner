@@ -137,7 +137,7 @@ ProgramArgs parse_args(int argc, char **argv)
                     break;
                 case PAA_UNAME:
                 case PAA_UNAME1:
-                    args.reqs.port = vptr;
+                    args.reqs.username = vptr;
                     break;
                 }
                 break;
