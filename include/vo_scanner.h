@@ -100,23 +100,26 @@
         exit(EXIT_FAILURE);               \
     } while (0)
 #else
-#define __fprintf_err(file, fmt, ...)
-#define __fthrowf_err(file, fmt, ...)
-#define __printf_err(fmt, ...)
-#define __throwf_err(fmt, ...)
-#define __fprint_err(file, cstr)
-#define __fthrow_err(file, cstr)
-#define __print_err(cstr)
-#define __throw_err(cstr)
-#define print_log
-#define print_err(fmt, ...)
-#define throw_err(fmt, ...)           \
-    do                                \
-    {                                 \
-        msgbox_err(fmt, ##__VA_ARGS); \
-        exit(EXIT_FAILURE);           \
+#define __fprintf_err(file, fmt, ...) ((void)0)
+#define __fthrowf_err(file, fmt, ...) ((void)0)
+#define __printf_err(fmt, ...) ((void)0)
+#define __throwf_err(fmt, ...) ((void)0)
+#define __fprint_err(file, cstr) ((void)0)
+#define __fthrow_err(file, cstr) ((void)0)
+#define __print_err(cstr) ((void)0)
+#define __throw_err(cstr) ((void)0)
+#define print_log(fmt, ...) ((void)0)
+#define print_err(fmt, ...) ((void)0)
+#define throw_err(fmt, ...)             \
+    do                                  \
+    {                                   \
+        msgbox_err(fmt, ##__VA_ARGS__); \
+        exit(EXIT_FAILURE);             \
     } while (0)
 #endif // NO_CONSOLE
+
+#define USAGE_FMT "usage: %s psw=<password> postid=<postazioneId> " \
+                  "[hostname=<hostname>] [port=<port>] [uname=<username>]"
 
 #define DEFAULT_HOSTNAME "127.0.0.1"
 #define DEFAULT_SERVER_PORT "443"
@@ -230,7 +233,7 @@ typedef struct CommData
 
 void *send_timbra_reqs(void *args);
 void *logger_routine(void *args);
-void popup_manager(void);
+void *popup_manager(void *args);
 SSL *init_https_conn(const char *hostname, const char *port);
 void show_certs(SSL *ssl);
 bool send_login_req(SSL *ssl, const char *username, const char *password, const char *hostname, char *cookies, size_t cookies_size);

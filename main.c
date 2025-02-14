@@ -36,7 +36,7 @@ int main(int argc, char **argv)
     pthread_t logger_pid;
     if (pthread_create(&logger_pid, NULL, logger_routine, (void *)&args.log))
         throw_err("Couldn't create logger routine thread");
-    popup_manager();
+    popup_manager(NULL);
 
     print_log("Main thread waiting for child processes.\n");
     pthread_join(reqs_pid, NULL);
@@ -97,10 +97,7 @@ void hide_console(void)
 ProgramArgs parse_args(int argc, char **argv)
 {
     if (argc < 3)
-        throw_err(
-            "usage: %s psw=<password> postid=<postazioneId> "
-            "[hostname=<hostname>] [port=<port>] [uname=<username>]",
-            argv[0]);
+        throw_err(USAGE_FMT, argv[0]);
 
     ProgramArgs args = {0};
 
@@ -147,6 +144,10 @@ ProgramArgs parse_args(int argc, char **argv)
             }
         }
     }
+
+    if (!args.reqs.password || !args.log.postazione_id)
+        throw_err(USAGE_FMT, argv[0]);
+
     return args;
 }
 
@@ -327,8 +328,10 @@ void *send_timbra_reqs(void *args)
     return NULL;
 }
 
-void popup_manager(void)
+void *popup_manager(void* args)
 {
+    (void)(args);
+
     static const char CLASS_NAME[] = "popup";
 
     WNDCLASS wc;
@@ -365,6 +368,8 @@ void popup_manager(void)
         TranslateMessage(&msg);
         DispatchMessage(&msg);
     }
+
+    return NULL;
 }
 
 LRESULT CALLBACK window_proc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)

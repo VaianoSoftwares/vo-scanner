@@ -21,7 +21,7 @@ ifeq ($(OS),Windows_NT)
 	MACHINE = $(OS) $(PROCESSOR_ARCHITECTURE)
 
 	CC = gcc
-	CFLAGS += -O2 -NO_CONSOLE
+	CFLAGS += -O2 -DNO_CONSOLE
 	CFLAGS += -IC:/msys64/ucrt64/include 
 	# CFLAGS += -DNMIN_COM=3
 else
